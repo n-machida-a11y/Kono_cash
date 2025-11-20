@@ -1,0 +1,1450 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <title>領収書登録アプリ Ver.2</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+  <style>
+    body {
+      background-color: #f8f9fa;
+      -webkit-text-size-adjust: 100%;
+    }
+    .container {
+      max-width: 1200px; 
+    }
+    .card {
+      border: none;
+      box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+    }
+    .loader {
+      display: none;
+    }
+    .nav-tabs .nav-link {
+      cursor: pointer;
+    }
+    .filter-area {
+      background-color: #e9ecef;
+      padding: 1rem;
+      border-radius: 0.25rem;
+    }
+    .amount-input {
+      text-align: right;
+    }
+    #alert-container {
+      position: fixed;
+      top: 1rem;
+      right: 1rem;
+      z-index: 1050;
+      min-width: 250px;
+    }
+    
+    #file-preview-container {
+      height: 600px;
+      background-color: #e9ecef;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: auto;
+      /* ★★★ 修正: プレビュー内のレイアウト調整 */
+      padding: 1rem;
+    }
+    #file-preview-container img {
+      max-width: 100%;
+      max-height: 100%;
+      width: auto;
+      height: auto;
+    }
+     #file-preview-container iframe {
+       width: 100%;
+       height: 100%;
+       border: none;
+    }
+    
+    #upload-section {
+      max-width: 550px;
+      margin: 4rem auto;
+    }
+
+    .detail-row {
+        background-color: #f8f9fa;
+        border: 1px solid #dee2e6;
+    }
+
+    .form-check {
+        min-height: calc(1.5em + 1rem + 2px);
+        display: flex;
+        align-items: center;
+        padding-top: 0.5rem;
+        padding-bottom: 0.5rem;
+    }
+    .form-check .form-check-input {
+      font-size: 1.2rem;
+      margin-top: 0;
+    }
+    .form-check .form-check-label {
+      font-size: 1rem;
+      margin-left: 0.5rem;
+    }
+
+    .form-control, .form-select {
+        min-height: calc(1.5em + 1rem + 2px);
+        padding: 0.5rem 1rem;
+        font-size: 1rem;
+    }
+
+    .btn {
+        padding: 0.5rem 1rem;
+        font-size: 1rem;
+    }
+    
+    /* ステータスバッジ */
+    .status-badge {
+      font-size: 0.8em;
+      padding: 0.4em 0.7em;
+      border-radius: 0.375rem;
+      font-weight: 600;
+    }
+    .status-not-checked { background-color: #fff3cd; color: #664d03; border: 1px solid #ffecb5; }
+    .status-checked { background-color: #d1e7dd; color: #0f5132; border: 1px solid #b6d7c3; }
+    .status-approved { background-color: #cff4fc; color: #055160; border: 1px solid #b6effb; }
+    .status-rejected { background-color: #f8d7da; color: #58151c; border: 1px solid #f1c0c5; }
+    
+    /* 権限で非表示にするためのクラス */
+    .d-none-role {
+      display: none !important;
+    }
+
+    @media (max-width: 991.98px) {
+        .container {
+            margin-top: 0.5rem;
+            margin-bottom: 0.5rem;
+            padding-left: 0.5rem;
+            padding-right: 0.5rem;
+        }
+         .card-body {
+            padding: 1rem;
+        }
+        .form-control, .form-select, .btn {
+            font-size: 1.05rem; 
+            padding-top: 0.8rem; 
+            padding-bottom: 0.8rem;
+        }
+        #file-preview-container {
+          height: 300px;
+          margin-bottom: 1.5rem; 
+        }
+        .table th, .table td {
+            padding: 0.75rem 0.5rem; 
+            vertical-align: middle;
+        }
+         .table .btn {
+            display: block;
+            width: 100%;
+            padding: 0.5rem;
+            font-size: 0.9rem;
+        }
+        #upload-section {
+          margin: 1rem auto;
+        }
+    }
+  </style>
+</head>
+<body>
+  <!-- GASサーバーから渡されたユーザー情報 -->
+  <script>
+    const rawUserInfo = '<?!= userInfo ?>';
+  </script>
+
+  <div class="container my-4">
+    <div class="card">
+      <div class="card-header">
+          <div class="d-flex justify-content-between align-items-center">
+            <h3 class="text-center my-2">領収書登録アプリ</h3>
+            <div id="user-info-display" class="text-end text-muted small">
+              <!-- JSでユーザー情報を表示 -->
+            </div>
+          </div>
+          
+        <!-- ★★★ 変更: タブ構成の変更 -->
+        <ul class="nav nav-tabs card-header-tabs" id="myTab" role="tablist">
+          <!-- ① 登録画面 (全員) -->
+          <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="upload-tab" data-bs-toggle="tab" data-bs-target="#upload-tab-pane" type="button" role="tab" aria-controls="upload-tab-pane" aria-selected="true">
+              <i class="bi bi-upload me-1"></i> 登録画面
+            </button>
+          </li>
+          <!-- ② 申請者画面 (全員) -->
+          <li class="nav-item" role="presentation">
+            <!-- ★★★ 修正: タブ名変更 -->
+            <button class="nav-link" id="history-tab" data-bs-toggle="tab" data-bs-target="#history-tab-pane" type="button" role="tab" aria-controls="history-tab-pane" aria-selected="false">
+              <i class="bi bi-person-lines-fill me-1"></i> 全履歴画面
+            </button>
+          </li>
+          <!-- ③ 管理者画面 (管理者・社長のみ) -->
+          <li class="nav-item d-none-role" id="admin-tab-li" role="presentation">
+            <button class="nav-link" id="admin-tab" data-bs-toggle="tab" data-bs-target="#admin-tab-pane" type="button" role="tab" aria-controls="admin-tab-pane" aria-selected="false">
+              <i class="bi bi-person-check-fill me-1"></i> 管理者画面
+            </button>
+          </li>
+          <!-- ④ 社長画面 (社長のみ) -->
+          <li class="nav-item d-none-role" id="president-tab-li" role="presentation">
+            <button class="nav-link" id="president-tab" data-bs-toggle="tab" data-bs-target="#president-tab-pane" type="button" role="tab" aria-controls="president-tab-pane" aria-selected="false">
+              <i class="bi bi-patch-check-fill me-1"></i> 社長画面
+            </button>
+          </li>
+        </ul>
+      </div>
+
+      <div class="card-body">
+        <div class="tab-content" id="myTabContent">
+
+          <!-- ======================================== -->
+          <!-- ① 登録画面 (変更なし) -->
+          <!-- ======================================== -->
+          <div class="tab-pane fade show active p-3" id="upload-tab-pane" role="tabpanel" aria-labelledby="upload-tab" tabindex="0">
+            
+            <div id="upload-section">
+                <form id="uploadForm">
+                  <div class="row g-3 mb-3">
+                      <div class="col-md-6">
+                          <label for="commonUseDate" class="form-label">申請日 (必須)</label>
+                          <input type="date" class="form-control" id="commonUseDate" required>
+                      </div>
+                      <div class="col-md-6">
+                          <label for="commonUser" class="form-label">使用者 (必須)</label>
+                          <select class="form-select" id="commonUser" required>
+                              <!-- オプションはJSで設定 -->
+                          </select>
+                      </div>
+                  </div>
+                  <hr>
+                  <div class="mb-3">
+                    <label for="imageFile" class="form-label">領収書を撮影または選択 (画像/PDF) - 複数選択可</label>
+                    <input class="form-control" type="file" id="imageFile" accept="image/*,application/pdf" required multiple>
+                  </div>
+                  <div class="d-grid mt-4">
+                    <button type="submit" class="btn btn-primary" id="submitButton">
+                      <span class="spinner-border spinner-border-sm loader" role="status" aria-hidden="true" id="spinner"></span>
+                      アップロードして解析
+                    </button>
+                  </div>
+                </form>
+            </div>
+
+            <!-- 編集フォーム (変更なし) -->
+            <div id="edit-section" style="display: none;">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h5>AI解析結果の確認・修正</h5>
+                    <h6 id="receipt-counter" class="text-end fw-bold text-primary" style="display: none;"></h6>
+                </div>
+                <div class="row">
+                    <div class="col-12 col-lg-6">
+                        <div id="file-preview-container" class="border rounded p-1 mb-3 mb-lg-0">
+                            <span class="text-muted">ファイルプレビュー</span>
+                        </div>
+                    </div>
+                    <div class="col-12 col-lg-6">
+                      <form id="receiptForm">
+                        <input type="hidden" id="receiptId">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label for="useDate" class="form-label">申請日</label>
+                                <input type="date" class="form-control" id="useDate" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="user" class="form-label">使用者</label>
+                                <select class="form-select" id="user" required></select>
+                            </div>
+                            <div class="col-12">
+                                <label for="storeName" class="form-label">支払先</label>
+                                <input type="text" class="form-control" id="storeName" required>
+                            </div>
+                            <div class="col-md-8">
+                                <label class="form-label" style="visibility: hidden;">インボイス</label>
+                                <div class="form-check bg-white border rounded px-3">
+                                  <input class="form-check-input" type="checkbox" id="hasInvoice">
+                                  <label class="form-check-label" for="hasInvoice">
+                                    インボイス番号あり
+                                  </label>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <label for="totalAmount" class="form-label">合計金額</label>
+                                <input type="number" class="form-control amount-input" id="totalAmount" placeholder="0" required readonly>
+                            </div>
+                             <div class="col-12">
+                                <label for="memo" class="form-label">メモ（領収書全体）</label>
+                                <textarea class="form-control" id="memo" rows="2"></textarea>
+                            </div>
+                        </div>
+                        <hr class="my-4">
+                        <h6>明細</h6>
+                        <div id="details-container"></div>
+                        <div class="d-grid mt-3">
+                            <button type="button" class="btn btn-outline-success" id="add-detail-btn">
+                                <i class="bi bi-plus-circle-fill me-2"></i>明細を追加
+                            </button>
+                        </div>
+                        <div class="d-grid gap-2 d-md-flex justify-content-md-end mt-4">
+                          <button type="button" class="btn btn-secondary me-md-2" id="cancelButton">キャンセル</button>
+                          <button type="submit" class="btn btn-primary" id="saveButton">登録</button>
+                        </div>
+                      </form>
+                    </div>
+                </div>
+            </div>
+          </div>
+
+          <!-- ======================================== -->
+          <!-- ② 申請者画面 -->
+          <!-- ======================================== -->
+          <div class="tab-pane fade p-3" id="history-tab-pane" role="tabpanel" aria-labelledby="history-tab" tabindex="0">
+            <div class="d-flex justify-content-between align-items-center">
+              <!-- ★★★ 修正: 見出し変更 -->
+              <h5>② 全履歴画面</h5>
+              <div id="monthly-total-display" class="text-end">
+                <!-- JSで月別集計を表示 -->
+              </div>
+            </div>
+            
+            <div class="filter-area mb-3">
+              <div class="row g-2 align-items-end">
+                <div class="col-md">
+                  <label for="filterStartDate" class="form-label">開始日</label>
+                  <input type="date" class="form-control" id="filterStartDate">
+                </div>
+                <div class="col-md">
+                  <label for="filterEndDate" class="form-label">終了日</label>
+                  <input type="date" class="form-control" id="filterEndDate">
+                </div>
+                <div class="col-md">
+                  <label for="filterStoreName" class="form-label">支払先</label>
+                  <input type="text" class="form-control" id="filterStoreName" placeholder="部分一致">
+                </div>
+                <!-- ★★★ 修正: 全履歴なので申請者フィルターを追加 -->
+                <div class="col-md">
+                  <label for="filterUser" class="form-label">申請者</label>
+                  <input type="text" class="form-control" id="filterUser" placeholder="氏名">
+                </div>
+                <div class="col-md-auto">
+                  <button class="btn btn-sm btn-primary w-100" id="filterButton">絞り込み</button>
+                </div>
+                 <div class="col-md-auto">
+                  <button class="btn btn-sm btn-outline-secondary w-100" id="clearFilterButton">クリア</button>
+                </div>
+              </div>
+            </div>
+            
+            <div class="d-flex justify-content-end mb-2">
+              <button class="btn btn-sm btn-success" id="downloadCsvButton">CSVダウンロード</button>
+            </div>
+
+            <div class="table-responsive">
+              <table class="table table-striped table-hover table-sm">
+                <thead>
+                  <tr>
+                    <th>操作</th>
+                    <th>申請日</th>
+                    <!-- ★★★ 修正: 申請者列を追加 -->
+                    <th>申請者</th>
+                    <th>支払先</th>
+                    <th>インボイス</th>
+                    <th>合計金額</th>
+                    <th>管理</th> <!-- M列 -->
+                    <th>承認</th> <!-- N列 -->
+                  </tr>
+                </thead>
+                <tbody id="historyTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- ======================================== -->
+          <!-- ③ 管理者画面 -->
+          <!-- ======================================== -->
+          <div class="tab-pane fade p-3" id="admin-tab-pane" role="tabpanel" aria-labelledby="admin-tab" tabindex="0">
+            <h5>③ 管理者チェック画面</h5>
+            
+            <!-- 管理者用フィルター -->
+            <div class="filter-area mb-3">
+              <div class="row g-2 align-items-end">
+                <div class="col-md">
+                  <label for="adminFilterStartDate" class="form-label">開始日</label>
+                  <input type="date" class="form-control" id="adminFilterStartDate">
+                </div>
+                <div class="col-md">
+                  <label for="adminFilterEndDate" class="form-label">終了日</label>
+                  <input type="date" class="form-control" id="adminFilterEndDate">
+                </div>
+                <div class="col-md">
+                  <label for="adminFilterUser" class="form-label">申請者</label>
+                  <input type="text" class="form-control" id="adminFilterUser" placeholder="氏名">
+                </div>
+                 <div class="col-md">
+                  <label for="adminFilterStatus" class="form-label">ステータス</label>
+                  <select class="form-select" id="adminFilterStatus">
+                    <!-- ★★★ 修正: フロー変更 (社長承認済みのものが対象) -->
+                    <option value="未チェック">未チェック (社長承認済み)</option>
+                    <option value="チェック済み">チェック済み (社長承認済み)</option>
+                    <option value="">すべて (社長承認済み)</option>
+                  </select>
+                </div>
+                <div class="col-md-auto">
+                  <button class="btn btn-sm btn-primary w-100" id="adminFilterButton">絞り込み</button>
+                </div>
+                 <div class="col-md-auto">
+                  <button class="btn btn-sm btn-outline-secondary w-100" id="adminClearFilterButton">クリア</button>
+                </div>
+              </div>
+            </div>
+            <div class="d-flex justify-content-end mb-2">
+              <button class="btn btn-sm btn-success" id="adminDownloadCsvButton">CSVダウンロード</button>
+            </div>
+
+            <!-- 管理者用テーブル -->
+            <div class="table-responsive">
+              <table class="table table-striped table-hover table-sm">
+                <thead>
+                  <tr>
+                    <th>操作</th>
+                    <th>申請日</th>
+                    <th>申請者</th>
+                    <th>支払先</th>
+                    <th>合計金額</th>
+                    <th>管理チェック</th>
+                    <th>最終承認</th>
+                  </tr>
+                </thead>
+                <tbody id="adminTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+          
+          <!-- ======================================== -->
+          <!-- ④ 社長画面 -->
+          <!-- ======================================== -->
+          <div class="tab-pane fade p-3" id="president-tab-pane" role="tabpanel" aria-labelledby="president-tab" tabindex="0">
+            <h5>④ 最終承認画面</h5>
+            
+            <!-- 社長用フィルター -->
+            <div class="filter-area mb-3">
+              <div class="row g-2 align-items-end">
+                <div class="col-md">
+                  <label for="presidentFilterStartDate" class="form-label">開始日</label>
+                  <input type="date" class="form-control" id="presidentFilterStartDate">
+                </div>
+                <div class="col-md">
+                  <label for="presidentFilterEndDate" class="form-label">終了日</label>
+                  <input type="date" class="form-control" id="presidentFilterEndDate">
+                </div>
+                <div class="col-md">
+                  <label for="presidentFilterUser" class="form-label">申請者</label>
+                  <input type="text" class="form-control" id="presidentFilterUser" placeholder="氏名">
+                </div>
+                 <div class="col-md">
+                  <label for="presidentFilterStatus" class="form-label">ステータス</label>
+                  <select class="form-select" id="presidentFilterStatus">
+                    <!-- ★★★ 修正: フロー変更 (こちらがStep 1) -->
+                    <option value="未承認">未承認のみ</option>
+                    <option value="承認">承認済み</option>
+                    <option value="差し戻し">差し戻し</option>
+                    <option value="">すべて</option>
+                  </select>
+                </div>
+                <div class="col-md-auto">
+                  <button class="btn btn-sm btn-primary w-100" id="presidentFilterButton">絞り込み</button>
+                </div>
+                 <div class="col-md-auto">
+                  <button class="btn btn-sm btn-outline-secondary w-100" id="presidentClearFilterButton">クリア</button>
+                </div>
+              </div>
+            </div>
+            <div class="d-flex justify-content-end mb-2">
+              <button class="btn btn-sm btn-success" id="presidentDownloadCsvButton">CSVダウンロード</button>
+            </div>
+            
+            <!-- 社長用テーブル -->
+            <div class="table-responsive">
+              <table class="table table-striped table-hover table-sm">
+                <thead>
+                  <tr>
+                    <th>操作</th>
+                    <th>申請日</th>
+                    <th>申請者</th>
+                    <th>支払先</th>
+                    <th>合計金額</th>
+                    <th>管理チェック</th>
+                    <th>最終承認</th>
+                  </tr>
+                </thead>
+                <tbody id="presidentTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Alert Container -->
+  <div id="alert-container"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    // --- グローバル変数 ---
+    let currentUser = { name: "Loading...", role: "Guest", card: "", email: "" };
+    let userOptions = '';
+    let categoryOptions = '';
+    let multiReceiptQueue = [];
+    // ★★★ 修正: プレビュー修復のため、ローカルURLのMapを追加
+    let localPreviewMap = new Map();
+
+    // --- 要素取得 ---
+    const uploadForm = document.getElementById('uploadForm');
+    const receiptForm = document.getElementById('receiptForm');
+    const fileInput = document.getElementById('imageFile');
+    const submitButton = document.getElementById('submitButton');
+    const saveButton = document.getElementById('saveButton');
+    const spinner = document.getElementById('spinner');
+    const detailsContainer = document.getElementById('details-container');
+    const uploadSection = document.getElementById('upload-section');
+    const editSection = document.getElementById('edit-section');
+    const commonUseDateEl = document.getElementById('commonUseDate');
+    const commonUserEl = document.getElementById('commonUser');
+    
+    // 申請者画面 (②)
+    const historyTableBody = document.getElementById('historyTableBody');
+    const historyTab = new bootstrap.Tab(document.getElementById('history-tab'));
+    const filterButton = document.getElementById('filterButton');
+    const clearFilterButton = document.getElementById('clearFilterButton');
+    const downloadCsvButton = document.getElementById('downloadCsvButton');
+
+    // 管理者画面 (③)
+    const adminTableBody = document.getElementById('adminTableBody');
+    const adminFilterButton = document.getElementById('adminFilterButton');
+    const adminClearFilterButton = document.getElementById('adminClearFilterButton');
+    const adminDownloadCsvButton = document.getElementById('adminDownloadCsvButton');
+
+    // 社長画面 (④)
+    const presidentTableBody = document.getElementById('presidentTableBody');
+    const presidentFilterButton = document.getElementById('presidentFilterButton');
+    const presidentClearFilterButton = document.getElementById('presidentClearFilterButton');
+    const presidentDownloadCsvButton = document.getElementById('presidentDownloadCsvButton');
+
+
+    // --- 初期化 (DOMContentLoaded) ---
+    document.addEventListener('DOMContentLoaded', () => {
+      try {
+        // サーバーから渡されたJSONをパース
+        currentUser = JSON.parse(rawUserInfo);
+
+        if (currentUser.error) {
+           showAlert(`初期化エラー: ${currentUser.error}。使用者マスタにメールアドレスが登録されているか確認してください。`, 'danger');
+           return;
+        }
+        if (currentUser.role === 'Guest') {
+           showAlert(`ようこそ、${currentUser.email}さん。ゲストユーザーは一部機能が制限されます。管理者に連絡して使用者マスタに登録してください。`, 'warning');
+        }
+
+        // 権限に基づいてUIを初期化
+        initializeUIBasedOnRole(currentUser.role);
+        
+        // 共通ドロップダウンの取得
+        google.script.run.withSuccessHandler(populateUserDropdown).getUsers();
+        google.script.run.withSuccessHandler(populateCategoryDropdown).getCategories();
+        
+        // ★★★ 修正: 「全履歴画面」をデフォルトで読み込み
+        fetchMyHistory();
+
+        // 申請日のデフォルトを今日に
+        commonUseDateEl.value = new Date().toISOString().slice(0, 10);
+
+      } catch(e) {
+        showAlert('アプリの初期化中に致命的なエラーが発生しました: ' + e.message, 'danger');
+        console.error('DOMContentLoaded error:', e);
+      }
+    });
+
+    /**
+     * ★★★ 新規: 権限に基づいてタブの表示/非表示を切り替える
+     */
+    function initializeUIBasedOnRole(role) {
+      // ユーザー情報を右上に表示
+      document.getElementById('user-info-display').textContent = `ログイン中: ${currentUser.name} (${currentUser.role})`;
+
+      const adminTab = document.getElementById('admin-tab-li');
+      const presidentTab = document.getElementById('president-tab-li');
+
+      if (role === '管理者' || role === '社長') {
+        adminTab.classList.remove('d-none-role');
+        // 管理者タブがクリックされたらデータを読み込む
+        document.getElementById('admin-tab').addEventListener('click', fetchAdminData);
+        // 管理者画面のフィルターイベント
+        adminFilterButton.addEventListener('click', fetchAdminData);
+        adminClearFilterButton.addEventListener('click', clearAdminFiltersAndFetch);
+        adminDownloadCsvButton.addEventListener('click', () => downloadCsv('admin'));
+      }
+      
+      if (role === '社長') {
+        presidentTab.classList.remove('d-none-role');
+        // 社長タブがクリックされたらデータを読み込む
+        document.getElementById('president-tab').addEventListener('click', fetchPresidentData);
+        // 社長画面のフィルターイベント
+        presidentFilterButton.addEventListener('click', fetchPresidentData);
+        presidentClearFilterButton.addEventListener('click', clearPresidentFiltersAndFetch);
+        presidentDownloadCsvButton.addEventListener('click', () => downloadCsv('president'));
+      }
+      
+      // ★★★ 修正: 「全履歴画面」のイベント
+      filterButton.addEventListener('click', fetchMyHistory);
+      clearFilterButton.addEventListener('click', clearMyHistoryFiltersAndFetch);
+      downloadCsvButton.addEventListener('click', () => downloadCsv('user'));
+    }
+
+
+    // --- イベントリスナー (登録画面) ---
+    uploadForm.addEventListener('submit', handleUploadSubmit);
+    receiptForm.addEventListener('submit', handleSaveSubmit);
+    document.getElementById('cancelButton').addEventListener('click', resetToUploadView);
+    document.getElementById('add-detail-btn').addEventListener('click', () => addDetailRow());
+    detailsContainer.addEventListener('input', handleDetailInputChange);
+    detailsContainer.addEventListener('change', handleDetailChange);
+
+    // --- ① 登録画面関数 (プレビュー修正) ---
+    function handleUploadSubmit(event) {
+      event.preventDefault();
+      const commonUseDate = commonUseDateEl.value;
+      const commonUser = commonUserEl.value;
+      if (!commonUseDate || !commonUser) {
+        showAlert('申請日と使用者を両方選択してください。', 'warning');
+        return;
+      }
+      const files = Array.from(fileInput.files);
+      if (files.length === 0) {
+        showAlert('ファイルを選択してください。', 'danger');
+        return;
+      }
+      setLoading(true);
+      multiReceiptQueue = []; 
+      // ★★★ 修正: プレビュー修復
+      localPreviewMap.clear();
+      uploadFileRecursive(files, 0, commonUseDate, commonUser);
+    }
+
+    function uploadFileRecursive(files, index, commonUseDate, commonUser) {
+      if (index >= files.length) {
+        setLoading(false);
+        if (multiReceiptQueue.length > 0) {
+            showNextReceiptInQueue();
+        } else {
+            showAlert('AIが領収書を検出できませんでした。', 'warning');
+            resetToUploadView();
+        }
+        return;
+      }
+      const file = files[index];
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => {
+        // ★★★ 修正: プレビュー修復のため、ローカルURLをMapに保存
+        localPreviewMap.set(file.name, reader.result);
+
+        const fileData = reader.result.split(',')[1];
+        const formObject = {
+          fileName: file.name,
+          mimeType: file.type,
+          fileData: fileData,
+          useDate: commonUseDate,
+          user: commonUser
+        };
+        google.script.run
+          .withSuccessHandler(response => {
+              if (response && response.status === 'success' && response.data) {
+                  multiReceiptQueue.push(...response.data); 
+              } else {
+                  const message = (response && response.message) ? response.message : '不明な応答';
+                  showAlert(`${file.name} の処理に失敗しました: ${message}`, 'warning');
+              }
+              uploadFileRecursive(files, index + 1, commonUseDate, commonUser);
+          })
+          .withFailureHandler(error => {
+              showAlert(`${file.name} のアップロードに失敗しました: ${error.message}`, 'danger');
+              uploadFileRecursive(files, index + 1, commonUseDate, commonUser);
+          })
+          .startUploadAndProcess(formObject);
+      };
+      reader.onerror = error => {
+          showAlert(`${file.name} の読み込みに失敗しました: ${error.message}`, 'danger');
+          uploadFileRecursive(files, index + 1, commonUseDate, commonUser);
+      };
+    }
+
+    function handleSaveSubmit(event) {
+        event.preventDefault();
+        saveButton.disabled = true;
+
+        const parentData = {
+            '登録ID': document.getElementById('receiptId').value,
+            useDate: document.getElementById('useDate').value,
+            user: document.getElementById('user').value,
+            storeName: document.getElementById('storeName').value,
+            memo: document.getElementById('memo').value,
+            hasInvoice: document.getElementById('hasInvoice').checked
+        };
+        
+        const detailsData = [];
+        const detailRows = detailsContainer.querySelectorAll('.detail-row');
+        let isValid = true;
+        detailRows.forEach(row => {
+            if (!row.querySelector('.detail-category').value) {
+                showAlert('すべての明細で勘定科目を選択してください。', 'warning');
+                isValid = false;
+            }
+            if (!row.querySelector('.detail-amount').value) {
+                showAlert('すべての明細で金額を入力してください。', 'warning');
+                isValid = false;
+            }
+            detailsData.push({
+                category: row.querySelector('.detail-category').value,
+                item: row.querySelector('.detail-item').value,
+                totalAmount: row.querySelector('.detail-amount').value,
+                client: row.querySelector('.detail-client').value,
+                participants: row.querySelector('.detail-participants').value,
+                subtotal: row.querySelector('.detail-subtotal').value,
+                tax: row.querySelector('.detail-tax').value,
+                memo: row.querySelector('.detail-memo').value
+            });
+        });
+        if (!isValid) {
+            saveButton.disabled = false;
+            return;
+        }
+        if (detailsData.length === 0) {
+            showAlert('明細を1件以上入力してください。', 'warning');
+            saveButton.disabled = false;
+            return;
+        }
+
+        google.script.run
+            .withSuccessHandler(onSaveSuccess)
+            .withFailureHandler(onFailure)
+            .updateFinalReceiptRow({ parentData, detailsData });
+    }
+    
+    function onSaveSuccess(response) {
+        saveButton.disabled = false;
+        if (response.status === 'success') {
+            showAlert('登録が完了しました。', 'success');
+            if (multiReceiptQueue.length > 0) {
+                showNextReceiptInQueue();
+            } else {
+                resetToUploadView();
+                // ★★★ 修正: 全履歴を更新
+                fetchMyHistory();
+                historyTab.show();
+            }
+        } else {
+            showAlert(response.message, 'danger');
+        }
+    }
+
+    // --- ② 全履歴画面関数 ---
+    
+    /**
+     * ★★★ 修正: 「全履歴」を取得・表示
+     */
+    function fetchMyHistory() {
+        // ★★★ 修正: 申請者列追加のため colspan=8
+        historyTableBody.innerHTML = '<tr><td colspan="8" class="text-center">履歴を読み込み中...</td></tr>';
+        
+        const filters = {
+          startDate: document.getElementById('filterStartDate').value,
+          endDate: document.getElementById('filterEndDate').value,
+          storeName: document.getElementById('filterStoreName').value,
+          // ★★★ 修正: 申請者フィルター
+          user: document.getElementById('filterUser').value,
+        };
+
+        google.script.run
+            .withSuccessHandler(onGetMyHistorySuccess)
+            .withFailureHandler(onFailure)
+            // ★★★ 修正: 自分の履歴 -> 全履歴 取得に変更
+            .getAllReceipts(filters);
+    }
+    
+    function clearMyHistoryFiltersAndFetch() {
+        document.getElementById('filterStartDate').value = '';
+        document.getElementById('filterEndDate').value = '';
+        document.getElementById('filterStoreName').value = '';
+        // ★★★ 修正: 申請者フィルター
+        document.getElementById('filterUser').value = '';
+        fetchMyHistory();
+    }
+
+    /**
+     * 全履歴テーブル描画 + 月別集計
+     */
+    function onGetMyHistorySuccess(receipts) {
+        const monthlyTotals = {};
+        let tableRows = '';
+
+        if (receipts && receipts.length > 0) {
+            receipts.forEach(item => {
+                tableRows += `
+                    <tr>
+                        <td>
+                            <button type="button" class="btn btn-sm btn-outline-primary mb-1" onclick="editReceipt('${item.receiptId}')">編集</button>
+                            ${item.fileId ? `<button type="button" class="btn btn-sm btn-outline-info" onclick="window.open('https://drive.google.com/file/d/${item.fileId}/view', '_blank')">画像</button>` : ''}
+                        </td>
+                        <td>${item.useDate || ''}</td>
+                        <!-- ★★★ 修正: 申請者列追加 -->
+                        <td>${item.user || ''}</td>
+                        <td>${item.storeName || ''}</td>
+                        <td>${item.hasInvoice ? '✔ あり' : 'なし'}</td>
+                        <td>${item.totalAmount ? item.totalAmount.toLocaleString() + '円' : ''}</td>
+                        <td>${renderStatusBadge(item.adminCheck)}</td>
+                        <td>${renderStatusBadge(item.presidentCheck)}</td>
+                    </tr>
+                `;
+                
+                // 月別集計
+                const month = item.useDate.substring(0, 7); // "yyyy/MM"
+                const amount = parseFloat(item.totalAmount) || 0;
+                if (!monthlyTotals[month]) {
+                    monthlyTotals[month] = 0;
+                }
+                monthlyTotals[month] += amount;
+            });
+        } else {
+            // ★★★ 修正: 申請者列追加のため colspan=8
+            tableRows = '<tr><td colspan="8" class="text-center">登録履歴はありません。</td></tr>';
+        }
+        historyTableBody.innerHTML = tableRows;
+        
+        // 月別集計の表示
+        const totalDisplay = document.getElementById('monthly-total-display');
+        let totalHtml = '<h6>月別合計 (表示分)</h6>';
+        const sortedMonths = Object.keys(monthlyTotals).sort().reverse();
+        if (sortedMonths.length > 0) {
+           sortedMonths.forEach(month => {
+             totalHtml += `<small>${month}: <strong>${monthlyTotals[month].toLocaleString()}円</strong></small><br>`;
+           });
+        } else {
+           totalHtml += '<small>データなし</small>';
+        }
+        totalDisplay.innerHTML = totalHtml;
+    }
+
+    // --- ③ 管理者画面関数 (フロー修正) ---
+    
+    /**
+     * 管理者用データを取得・表示
+     */
+    function fetchAdminData() {
+        adminTableBody.innerHTML = '<tr><td colspan="7" class="text-center">データを読み込み中...</td></tr>';
+        
+        const filters = {
+          startDate: document.getElementById('adminFilterStartDate').value,
+          endDate: document.getElementById('adminFilterEndDate').value,
+          user: document.getElementById('adminFilterUser').value,
+          adminCheckStatus: document.getElementById('adminFilterStatus').value,
+          // ★★★ 修正: フロー変更 (社長承認済みのものだけが対象)
+          presidentCheckStatus: '承認'
+        };
+
+        google.script.run
+            .withSuccessHandler(onGetAdminDataSuccess)
+            .withFailureHandler(onFailure)
+            .getAllReceipts(filters);
+    }
+    
+    function clearAdminFiltersAndFetch() {
+        document.getElementById('adminFilterStartDate').value = '';
+        document.getElementById('adminFilterEndDate').value = '';
+        document.getElementById('adminFilterUser').value = '';
+        document.getElementById('adminFilterStatus').value = '未チェック';
+        fetchAdminData();
+    }
+
+    function onGetAdminDataSuccess(receipts) {
+        let tableRows = '';
+        if (receipts && receipts.length > 0) {
+            receipts.forEach(item => {
+                tableRows += `
+                    <tr>
+                        <td>
+                            <button type="button" class="btn btn-sm btn-outline-primary mb-1" onclick="editReceipt('${item.receiptId}')">確認/編集</button>
+                        </td>
+                        <td>${item.useDate || ''}</td>
+                        <td>${item.user || ''}</td>
+                        <td>${item.storeName || ''}</td>
+                        <td>${item.totalAmount ? item.totalAmount.toLocaleString() + '円' : ''}</td>
+                        <td>
+                          ${ (item.adminCheck === '未チェック' && item.presidentCheck === '承認') // ★★★ 修正: 社長承認済みか確認
+                             ? `<button type="button" class="btn btn-sm btn-success" onclick="updateStatus('${item.receiptId}', 'admin', 'チェック済み', fetchAdminData)">チェック済みにする</button>`
+                             : renderStatusBadge(item.adminCheck)
+                          }
+                        </td>
+                        <td>${renderStatusBadge(item.presidentCheck)}</td>
+                    </tr>
+                `;
+            });
+        } else {
+            tableRows = '<tr><td colspan="7" class="text-center">対象のデータはありません。</td></tr>';
+        }
+        adminTableBody.innerHTML = tableRows;
+    }
+
+
+    // --- ④ 社長画面関数 (フロー修正) ---
+    
+    /**
+     * 社長用データを取得・表示
+     */
+    function fetchPresidentData() {
+        presidentTableBody.innerHTML = '<tr><td colspan="7" class="text-center">データを読み込み中...</td></tr>';
+        
+        const filters = {
+          startDate: document.getElementById('presidentFilterStartDate').value,
+          endDate: document.getElementById('presidentFilterEndDate').value,
+          user: document.getElementById('presidentFilterUser').value,
+          // ★★★ 修正: フロー変更 (adminCheckStatusは不要)
+          presidentCheckStatus: document.getElementById('presidentFilterStatus').value
+        };
+
+        google.script.run
+            .withSuccessHandler(onGetPresidentDataSuccess)
+            .withFailureHandler(onFailure)
+            .getAllReceipts(filters);
+    }
+    
+    function clearPresidentFiltersAndFetch() {
+        document.getElementById('presidentFilterStartDate').value = '';
+        document.getElementById('presidentFilterEndDate').value = '';
+        document.getElementById('presidentFilterUser').value = '';
+        document.getElementById('presidentFilterStatus').value = '未承認';
+        fetchPresidentData();
+    }
+    
+    function onGetPresidentDataSuccess(receipts) {
+        let tableRows = '';
+        if (receipts && receipts.length > 0) {
+            receipts.forEach(item => {
+                let actionButtons = '';
+                // ★★★ 修正: フロー変更 (社長がStep 1)
+                if (item.presidentCheck === '未承認') {
+                   actionButtons = `
+                     <div class="btn-group w-100" role="group">
+                       <button type="button" class="btn btn-sm btn-primary" onclick="updateStatus('${item.receiptId}', 'president', '承認', fetchPresidentData)">承認</button>
+                       <button type="button" class="btn btn-sm btn-danger" onclick="updateStatus('${item.receiptId}', 'president', '差し戻し', fetchPresidentData)">差し戻し</button>
+                     </div>
+                   `;
+                } else {
+                   actionButtons = renderStatusBadge(item.presidentCheck);
+                   // 承認・差し戻し済みのものを元に戻す
+                   if (item.presidentCheck === '承認') {
+                     actionButtons += `<button type"button" class="btn btn-sm btn-outline-secondary mt-1" onclick="updateStatus('${item.receiptId}', 'president', '未承認', fetchPresidentData)">承認取消</button>`;
+                   }
+                   if (item.presidentCheck === '差し戻し') {
+                     actionButtons += `<button type"button" class="btn btn-sm btn-outline-secondary mt-1" onclick="updateStatus('${item.receiptId}', 'president', '未承認', fetchPresidentData)">差し戻し取消</button>`;
+                   }
+                }
+            
+                tableRows += `
+                    <tr>
+                        <td>
+                            <button type="button" class="btn btn-sm btn-outline-primary mb-1" onclick="editReceipt('${item.receiptId}')">内容確認</button>
+                        </td>
+                        <td>${item.useDate || ''}</td>
+                        <td>${item.user || ''}</td>
+                        <td>${item.storeName || ''}</td>
+                        <td>${item.totalAmount ? item.totalAmount.toLocaleString() + '円' : ''}</td>
+                        <td>${renderStatusBadge(item.adminCheck)}</td>
+                        <td>${actionButtons}</td>
+                    </tr>
+                `;
+            });
+        } else {
+            tableRows = '<tr><td colspan="7" class="text-center">対象のデータはありません。</td></tr>';
+        }
+        presidentTableBody.innerHTML = tableRows;
+    }
+
+
+    // --- 共通関数 (編集・ステータス更新) ---
+
+    /**
+     * ★★★ 新規: ステータスを更新する (全画面共通)
+     * @param {function} callbackFn - 更新成功後に実行するリフレッシュ関数 (例: fetchMyHistory, fetchAdminData)
+     */
+    function updateStatus(receiptId, statusType, newStatus, callbackFn) {
+      if (!receiptId) {
+        showAlert('IDがありません。', 'danger');
+        return;
+      }
+      
+      // 簡易確認
+      if (newStatus === '差し戻し' && !confirm('本当に差し戻しますか？ 管理者のチェックも「未チェック」に戻ります。')) {
+        return;
+      }
+      if (newStatus === '承認取消' && !confirm('承認を取り消しますか？')) {
+        newStatus = '未承認'; // 実際のステータスは「未承認」
+      }
+      if (newStatus === '差し戻し取消' && !confirm('差し戻しを取り消しますか？')) {
+        newStatus = '未承認'; // 実際のステータスは「未承認」
+      }
+
+      google.script.run
+        .withSuccessHandler(response => {
+          if (response.status === 'success') {
+            showAlert(response.message, 'success');
+            if (callbackFn) callbackFn(); // 成功したらテーブルをリフレッシュ
+          } else {
+            showAlert(response.message, 'danger');
+          }
+        })
+        .withFailureHandler(onFailure)
+        .updateReceiptStatus(receiptId, statusType, newStatus);
+    }
+    
+    /**
+     * 履歴・管理画面から編集 (全画面共通)
+     */
+    function editReceipt(receiptId) {
+      // ★★★ 修正: 押した瞬間にフィードバックを返す
+      showAlert('編集データを読み込み中...', 'info');
+
+      google.script.run
+        .withSuccessHandler(response => {
+          if(response.status === 'success') {
+            showEditSection(response.data, false); // 'false' は履歴からの編集を示す
+            const uploadTab = new bootstrap.Tab(document.getElementById('upload-tab'));
+            uploadTab.show();
+          } else {
+            showAlert(response.message, 'danger');
+          }
+        })
+        .withFailureHandler(onFailure)
+        .getReceiptDetails(receiptId);
+    }
+
+    // --- UI コントロール (編集フォーム) (プレビュー修正) ---
+    function showNextReceiptInQueue() {
+        if (multiReceiptQueue.length === 0) {
+            showAlert('全ての領収書の処理が完了しました。', 'info');
+            resetToUploadView();
+            fetchMyHistory();
+            historyTab.show();
+            return;
+        }
+        const nextReceipt = multiReceiptQueue.shift();
+        showEditSection(nextReceipt, true); 
+
+        const counter = document.getElementById('receipt-counter');
+        const total = multiReceiptQueue.length + 1;
+        if (total > 1) {
+            counter.textContent = `${total - multiReceiptQueue.length} / ${total} 件目`;
+            counter.style.display = 'block';
+            saveButton.textContent = '登録して次へ';
+        }
+    }
+
+    function showEditSection(data, isNewUpload) {
+        const { parentData, detailsData } = data;
+        receiptForm.reset();
+        
+        document.getElementById('receiptId').value = parentData['登録ID'] || '';
+        
+        const dateParts = parentData.useDate ? parentData.useDate.split('/') : [];
+        if (dateParts.length === 3) {
+           document.getElementById('useDate').value = `${dateParts[0]}-${dateParts[1].padStart(2, '0')}-${dateParts[2].padStart(2, '0')}`;
+        } else {
+           document.getElementById('useDate').value = new Date().toISOString().slice(0, 10);
+        }
+        
+        document.getElementById('user').value = parentData.user || '';
+        document.getElementById('storeName').value = parentData.storeName || '';
+        document.getElementById('totalAmount').value = parentData.totalAmount || '0';
+        document.getElementById('memo').value = parentData.memo || '';
+        document.getElementById('hasInvoice').checked = parentData.hasInvoice || false;
+        
+        // ★★★ 修正: プレビュー修復 (編集時)
+        const previewContainer = document.getElementById('file-preview-container');
+        if (isNewUpload) {
+            // ★★★ 修正: 'fileName' は parentData から取得
+            const localUrl = localPreviewMap.get(parentData.fileName);
+            if (localUrl && parentData.mimeType) {
+                if (parentData.mimeType.startsWith('image/')) {
+                    previewContainer.innerHTML = `<img src="${localUrl}" alt="領収書プレビュー">`;
+                } else if (parentData.mimeType === 'application/pdf') {
+                    // ローカルのDataURLはiframeでは長すぎて表示できない
+                    previewContainer.innerHTML = '<span class="text-muted">PDFは登録後にプレビュー可能になります。</span>';
+                } else {
+                    previewContainer.innerHTML = `<span class="text-muted">プレビュー不可 (${parentData.mimeType})</span>`;
+                }
+            } else {
+                 previewContainer.innerHTML = `<span class="text-muted">プレビューを生成中... (ファイル名: ${parentData.fileName})</span>`;
+            }
+        } else if (parentData.fileId && parentData.mimeType) {
+            // --- mimeTypeが取得できた場合 (正常系) ---
+            if(parentData.mimeType.startsWith('image/')) {
+                previewContainer.innerHTML = `<img src="https://docs.google.com/uc?export=view&id=${parentData.fileId}" alt="領収書プレビュー">`;
+            } else if (parentData.mimeType === 'application/pdf') {
+                // PDFのiframeはX-Frame-Optionsで失敗することがあるため、リンクで代用
+                previewContainer.innerHTML = `
+                    <div class="text-center p-3">
+                        <i class="bi bi-file-earmark-pdf" style="font-size: 3rem;"></i>
+                        <p class="mt-2">PDFプレビューがインラインで表示できない場合があります。</p>
+                        <a href="https://drive.google.com/file/d/${parentData.fileId}/preview" class="btn btn-info" target="_blank" rel="noopener noreferrer">
+                            <i class="bi bi-box-arrow-up-right me-2"></i> PDFを新しいタブでプレビュー
+                        </a>
+                    </div>`;
+            } else {
+                 previewContainer.innerHTML = `<span class="text-muted">サポートされていないファイル形式です。 (${parentData.mimeType})</span>`;
+            }
+        } else if (parentData.fileId && !parentData.mimeType) {
+            // ★★★ 修正: mimeTypeが取得できなくても、fileIdがあればリンクを表示 (対策A)
+            previewContainer.innerHTML = `
+                <div class="text-center p-3">
+                    <i class="bi bi-file-earmark-break" style="font-size: 3rem;"></i>
+                    <p class="mt-2 text-danger">MIMEタイプの取得に失敗しました。<br>（appsscript.jsonの権限承認が完了していない可能性があります）</p>
+                    <a href="https://drive.google.com/file/d/${parentData.fileId}/view" class="btn btn-warning" target="_blank" rel="noopener noreferrer">
+                        <i class="bi bi-box-arrow-up-right me-2"></i> Google Driveでファイルを開く
+                    </a>
+                </div>`;
+        } else {
+            // --- fileIdもない場合 ---
+            previewContainer.innerHTML = '<span class="text-muted">プレビューするファイルがありません。</span>';
+        }
+        
+        detailsContainer.innerHTML = '';
+        if (detailsData && detailsData.length > 0) {
+            detailsData.forEach(addDetailRow);
+        } else {
+            addDetailRow({totalAmount: parentData.totalAmount});
+        }
+        recalculateTotal();
+
+        uploadSection.style.display = 'none';
+        editSection.style.display = 'block';
+    }
+
+    function addDetailRow(detail = {}) {
+        const div = document.createElement('div');
+        div.className = 'row g-3 p-3 mb-3 detail-row rounded';
+        div.innerHTML = `
+            <div class="col-12">
+                <div class="d-flex justify-content-between">
+                    <label class="form-label">勘定科目</label>
+                    <button type="button" class="btn-close" aria-label="削除"></button>
+                </div>
+                <select class="form-select detail-category" required>${categoryOptions}</select>
+            </div>
+            <div class="col-12">
+                <label class="form-label">品目</label>
+                <input type="text" class="form-control detail-item">
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">取引先</label>
+                <input type="text" class="form-control detail-client">
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">参加人数</label>
+                <input type="text" class="form-control detail-participants">
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">金額（税込）</label>
+                <input type="number" class="form-control amount-input detail-amount" placeholder="0" required>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">消費税率</label>
+                <select class="form-select detail-tax-rate">
+                    <option value="0.1" selected>10%</option>
+                    <option value="0.08">8%</option>
+                    <option value="0">免税</option>
+                </select>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">税抜合計</label>
+                <input type="number" class="form-control amount-input detail-subtotal" placeholder="0" readonly>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">消費税</label>
+                <input type="number" class="form-control amount-input detail-tax" placeholder="0" readonly>
+            </div>
+            <div class="col-12">
+                <label class="form-label">メモ（明細）</label>
+                <textarea class="form-control detail-memo" rows="1"></textarea>
+            </div>
+        `;
+        div.querySelector('.btn-close').addEventListener('click', () => {
+            div.remove();
+            recalculateTotal();
+        });
+        div.querySelector('.detail-category').value = detail.category || '';
+        div.querySelector('.detail-item').value = detail.item || '';
+        div.querySelector('.detail-client').value = detail.client || '';
+        div.querySelector('.detail-participants').value = detail.participants || '';
+        div.querySelector('.detail-amount').value = detail.totalAmount || '';
+        div.querySelector('.detail-memo').value = detail.memo || '';
+        detailsContainer.appendChild(div);
+        calculateDetailAmounts(div);
+        updateDetailCategory(div);
+        validateDetailParticipants(div);
+    }
+
+    function resetToUploadView() {
+        fileInput.value = ''; 
+        receiptForm.reset();
+        detailsContainer.innerHTML = '';
+        editSection.style.display = 'none';
+        uploadSection.style.display = 'block';
+        multiReceiptQueue = [];
+        localPreviewMap.clear(); // ★★★ 修正: プレビューMapをクリア
+        document.getElementById('receipt-counter').style.display = 'none';
+        saveButton.textContent = '登録';
+    }
+
+
+    // --- 共通ユーティリティ ---
+    
+    /**
+     * CSVダウンロード (権限とタブによってフィルタを変える)
+     */
+    function downloadCsv(tabIdentifier) {
+        let filters = {};
+        let buttonId;
+        
+        if (tabIdentifier === 'user') {
+            filters.startDate = document.getElementById('filterStartDate').value;
+            filters.endDate = document.getElementById('filterEndDate').value;
+            filters.storeName = document.getElementById('filterStoreName').value;
+            // ★★★ 修正: 申請者フィルター
+            filters.user = document.getElementById('filterUser').value;
+            buttonId = 'downloadCsvButton';
+        } else if (tabIdentifier === 'admin') {
+            filters.startDate = document.getElementById('adminFilterStartDate').value;
+            filters.endDate = document.getElementById('adminFilterEndDate').value;
+            filters.user = document.getElementById('adminFilterUser').value;
+            // ★★★ 修正: フロー変更 (CSVも社長承認済みが対象)
+            filters.presidentCheckStatus = '承認';
+            filters.adminCheckStatus = document.getElementById('adminFilterStatus').value;
+            buttonId = 'adminDownloadCsvButton';
+        } else if (tabIdentifier === 'president') {
+            filters.startDate = document.getElementById('presidentFilterStartDate').value;
+            filters.endDate = document.getElementById('presidentFilterEndDate').value;
+            filters.user = document.getElementById('presidentFilterUser').value;
+            // ★★★ 修正: フロー変更
+            filters.presidentCheckStatus = document.getElementById('presidentFilterStatus').value;
+            buttonId = 'presidentDownloadCsvButton';
+        }
+
+        const button = document.getElementById(buttonId);
+        button.disabled = true;
+        button.textContent = '作成中...';
+
+        google.script.run
+            .withSuccessHandler(csvData => {
+                if (typeof csvData !== 'string' || csvData.startsWith("エラー:") || csvData === "データがありません") {
+                    showAlert(csvData || 'CSVデータの生成に失敗しました。', 'warning');
+                } else {
+                    const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
+                    const blob = new Blob([bom, csvData], { type: 'text/csv;charset=utf-8;' });
+                    const link = document.createElement("a");
+                    const url = URL.createObjectURL(blob);
+                    link.setAttribute("href", url);
+                    const fileName = `領収書履歴_${tabIdentifier}_${new Date().toISOString().slice(0,10)}.csv`;
+                    link.setAttribute("download", fileName);
+                    link.style.visibility = 'hidden';
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    showAlert('CSVファイルのダウンロードを開始しました。', 'success');
+                }
+                button.disabled = false;
+                button.textContent = 'CSVダウンロード';
+            })
+            .withFailureHandler(err => {
+                onFailure(err);
+                button.disabled = false;
+                button.textContent = 'CSVダウンロード';
+            })
+            // ★★★ 修正: フィルターオブジェクトを渡す
+            .getReceiptsAsCsv(filters, currentUser.name, currentUser.role);
+    }
+    
+    /**
+     * ステータスの文字列に応じてバッジHTMLを返す
+     */
+    function renderStatusBadge(status) {
+        if (!status) status = "未設定";
+        switch (status) {
+            case '未チェック':
+                return `<span class="status-badge status-not-checked">${status}</span>`;
+            case 'チェック済み':
+                return `<span class="status-badge status-checked">${status}</span>`;
+            case '未承認':
+                return `<span class="status-badge status-not-checked">${status}</span>`;
+            case '承認':
+                return `<span class="status-badge status-approved">${status}</span>`;
+            case '差し戻し':
+                return `<span class="status-badge status-rejected">${status}</span>`;
+            default:
+                return `<span class="status-badge">${status}</span>`;
+        }
+    }
+    
+    // 汎用エラーハンドラ
+    function onFailure(error) {
+        setLoading(false);
+        saveButton.disabled = false;
+        const errorMessage = (error && error.message) ? error.message : String(error);
+        showAlert('サーバー側でエラーが発生しました: ' + errorMessage, 'danger');
+        console.error("A server-side error occurred:", error);
+    }
+    
+    // ローディングスピナー
+    function setLoading(isLoading) {
+      submitButton.disabled = isLoading;
+      spinner.style.display = isLoading ? 'inline-block' : 'none';
+    }
+
+    // アラート表示
+    function showAlert(message, type = 'info') {
+      const alertContainer = document.getElementById('alert-container');
+      const alertDiv = document.createElement('div');
+      alertDiv.className = `alert alert-${type} alert-dismissible fade show`;
+      alertDiv.role = 'alert';
+      alertDiv.innerHTML = `
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+      `;
+      alertContainer.appendChild(alertDiv);
+      setTimeout(() => {
+        const bsAlert = new bootstrap.Alert(alertDiv);
+        bsAlert.close();
+      }, 5000);
+    }
+    
+    // --- フォーム入力イベント (変更なし) ---
+    function handleDetailInputChange(e) {
+      const detailRow = e.target.closest('.detail-row');
+      if (!detailRow) return;
+      if (e.target.classList.contains('detail-amount')) {
+        recalculateTotal();
+      }
+      if (e.target.classList.contains('detail-amount') || e.target.classList.contains('detail-tax-rate')) {
+        calculateDetailAmounts(detailRow);
+      }
+      if (e.target.classList.contains('detail-amount') || e.target.classList.contains('detail-participants')) {
+        updateDetailCategory(detailRow);
+      }
+    }
+    function handleDetailChange(e) {
+        const detailRow = e.target.closest('.detail-row');
+        if (!detailRow) return;
+        if (e.target.classList.contains('detail-category')) {
+            validateDetailParticipants(detailRow);
+        }
+    }
+    function populateUserDropdown(users) {
+        const selectEdit = document.getElementById('user');
+        const selectCommon = document.getElementById('commonUser');
+        let options = '<option value="">選択してください</option>';
+        users.forEach(user => {
+            options += `<option value="${user}">${user}</option>`;
+        });
+        selectEdit.innerHTML = options;
+        selectCommon.innerHTML = options;
+        // ログインユーザーをデフォルト選択
+        if (currentUser.name && users.includes(currentUser.name)) {
+          selectCommon.value = currentUser.name;
+        }
+        userOptions = options;
+    }
+    function populateCategoryDropdown(categories) {
+        let options = '<option value="">選択してください</option>';
+        categories.forEach(cat => {
+            options += `<option value="${cat}">${cat}</option>`;
+        });
+        categoryOptions = options;
+    }
+    function calculateDetailAmounts(detailRow) {
+      const totalInput = detailRow.querySelector('.detail-amount');
+      const rateSelect = detailRow.querySelector('.detail-tax-rate');
+      const subtotalInput = detailRow.querySelector('.detail-subtotal');
+      const taxInput = detailRow.querySelector('.detail-tax');
+      const total = parseFloat(totalInput.value) || 0;
+      const rate = parseFloat(rateSelect.value);
+      if (total > 0 && isFinite(rate)) {
+          const subtotal = Math.round(total / (1 + rate));
+          const tax = total - subtotal;
+          subtotalInput.value = subtotal;
+          taxInput.value = tax;
+      } else {
+          subtotalInput.value = '';
+          taxInput.value = '';
+      }
+    }
+    function updateDetailCategory(detailRow) {
+        const totalAmount = parseFloat(detailRow.querySelector('.detail-amount').value) || 0;
+        const participantsValue = detailRow.querySelector('.detail-participants').value.trim();
+        const categorySelect = detailRow.querySelector('.detail-category');
+        const currentCategory = categorySelect.value;
+        const isEntertainmentRelated = ['接待交際費', '少額接待交際費', '会議費', ''].includes(currentCategory);
+        if (totalAmount <= 0 || participantsValue === '' || !isEntertainmentRelated) return;
+        if (participantsValue.includes('割勘')) {
+            categorySelect.value = '接待交際費';
+            return;
+        }
+        const numberOfParticipants = parseInt(participantsValue, 10);
+        if (!isNaN(numberOfParticipants) && numberOfParticipants > 0) {
+            const amountPerPerson = totalAmount / numberOfParticipants;
+            if (amountPerPerson > 10000) { 
+                categorySelect.value = '接待交際費';
+            } else {
+                categorySelect.value = '少額接待交際費';
+            }
+        }
+        validateDetailParticipants(detailRow);
+    }
+    function validateDetailParticipants(detailRow) {
+        const categorySelect = detailRow.querySelector('.detail-category');
+        const participantsInput = detailRow.querySelector('.detail-participants');
+        if (!categorySelect || !participantsInput) {
+            console.error("validateDetailParticipants: 要素が見つかりません。", detailRow);
+            return;
+        }
+        const participantsValue = participantsInput.value.trim();
+        const entertainmentCategories = ['接待交際費', '少額接待交際費', '会議費'];
+        const isEntertainment = entertainmentCategories.includes(categorySelect.value);
+        const existingFeedback = participantsInput.closest('.col-md-6').querySelector('.invalid-feedback');
+        if (existingFeedback) existingFeedback.remove();
+        participantsInput.classList.remove('is-invalid');
+        if (!isEntertainment) return;
+        const isNumeric = participantsValue !== '' && isFinite(Number(participantsValue));
+        const isWarikan = participantsValue.includes('割勘');
+        if (!participantsValue || (!isNumeric && !isWarikan)) {
+            participantsInput.classList.add('is-invalid');
+            const feedbackDiv = document.createElement('div');
+            feedbackDiv.className = 'invalid-feedback d-block';
+            feedbackDiv.textContent = '参加人数の入力が必要です。';
+            participantsInput.parentNode.appendChild(feedbackDiv);
+        }
+    }
+    function recalculateTotal() {
+        let total = 0;
+        const amounts = detailsContainer.querySelectorAll('.detail-amount');
+        amounts.forEach(input => {
+            total += Number(input.value) || 0;
+        });
+        document.getElementById('totalAmount').value = total;
+    }
+    
+  </script>
+</body>
+</html>
