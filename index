@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>現金経費精算</title>
+  <title>現金経費精算アプリ</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
@@ -22,6 +22,21 @@
     .drag-area:hover { background-color: #f1f1f1; border-color: #0d6efd; }
     /* 明細テーブル用 */
     .detail-row input, .detail-row select { font-size: 0.9rem; }
+    /* グルーピング表示用 */
+    .group-header {
+      background-color: #e9ecef;
+      padding: 10px 15px;
+      font-weight: bold;
+      border-radius: 4px;
+      margin-top: 15px;
+      margin-bottom: 5px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .group-item {
+        padding-left: 15px;
+    }
   </style>
 </head>
 <body>
@@ -35,13 +50,13 @@
 <!-- ナビゲーション -->
 <nav class="navbar navbar-expand-lg navbar-dark bg-primary mb-4">
   <div class="container">
-    <a class="navbar-brand" href="#"><i class="fas fa-receipt me-2"></i>現金経費精算</a>
+    <a class="navbar-brand" href="#"><i class="fas fa-coins me-2"></i>現金経費精算アプリ</a>
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
       <span class="navbar-toggler-icon"></span>
     </button>
     <div class="collapse navbar-collapse" id="navbarNav">
       <ul class="navbar-nav me-auto">
-        <li class="nav-item"><a class="nav-link active" id="nav-apply" href="#" onclick="showView('apply'); resetApplyForm();">新規申請</a></li>
+        <li class="nav-item"><a class="nav-link active" id="nav-apply" href="#" onclick="showView('apply'); resetApplyForm();">新規登録</a></li>
         <li class="nav-item"><a class="nav-link" id="nav-dashboard" href="#" onclick="showView('dashboard')">ダッシュボード</a></li>
         <li class="nav-item" id="navApproval" style="display:none;"><a class="nav-link" id="nav-approvalList" href="#" onclick="showView('approvalList')">承認タスク <span class="badge bg-danger" id="badgeCount">0</span></a></li>
         <li class="nav-item" id="navAdmin" style="display:none;"><a class="nav-link" id="nav-admin" href="#" onclick="showView('admin')">管理・出力</a></li>
@@ -92,8 +107,21 @@
     <div class="tab-content" id="dashboardTabContent">
       <div class="tab-pane fade show active" id="my-tab-pane" role="tabpanel">
         <div class="card p-3">
-          <table class="table table-hover">
-            <thead><tr><th>利用日</th><th>支払先</th><th>合計金額</th><th>ステータス</th><th>承認者</th><th>操作</th></tr></thead>
+          <div class="d-flex justify-content-between align-items-center mb-2">
+             <div class="alert alert-light border small mb-0 py-2">
+                <i class="fas fa-info-circle me-1"></i> [未申請]を選択してまとめて申請できます。
+             </div>
+             <button class="btn btn-success btn-sm" id="btnBulkSubmit" onclick="submitBulk()" disabled>
+                <i class="fas fa-paper-plane me-2"></i>選択した項目を一括申請
+             </button>
+          </div>
+          <table class="table table-hover align-middle">
+            <thead>
+                <tr>
+                    <th width="40"><input type="checkbox" id="checkAll" onclick="toggleAllChecks(this)"></th>
+                    <th>利用日</th><th>支払先</th><th>合計金額</th><th>ステータス</th><th>承認者</th><th>操作</th>
+                </tr>
+            </thead>
             <tbody id="myAppList"></tbody>
           </table>
         </div>
@@ -101,20 +129,25 @@
       
       <div class="tab-pane fade" id="all-tab-pane" role="tabpanel">
         <div class="card p-3">
-            <div class="alert alert-info py-2 small"><i class="fas fa-info-circle me-2"></i>経理権限ユーザーのみ全件表示されています</div>
-            <table class="table table-hover table-sm">
-            <thead><tr><th>申請者</th><th>利用日</th><th>支払先</th><th>合計金額</th><th>ステータス</th><th>承認者</th><th>操作</th></tr></thead>
-            <tbody id="allAppList"></tbody>
-          </table>
+            <div class="d-flex justify-content-between align-items-center mb-3">
+               <div class="alert alert-info py-2 small mb-0"><i class="fas fa-info-circle me-2"></i>登録日ごとにグルーピング表示</div>
+               <div class="input-group" style="width: 300px;">
+                 <span class="input-group-text"><i class="fas fa-search"></i></span>
+                 <input type="text" class="form-control" id="filterInput" placeholder="申請者名で絞り込み..." onkeyup="filterGroupedApps('allAppListContainer')">
+               </div>
+            </div>
+            <div id="allAppListContainer">
+                <!-- グルーピング表示エリア -->
+            </div>
         </div>
       </div>
     </div>
   </div>
 
   <div id="applyView">
-    <h3 class="mb-4" id="applyViewTitle">経費申請</h3>
+    <h3 class="mb-4" id="applyViewTitle">経費データ登録</h3>
     <div class="card p-4" id="uploadArea">
-      <h5 class="mb-4">申請方法を選択</h5>
+      <h5 class="mb-4">登録方法を選択</h5>
       <div class="row g-4">
         <div class="col-md-6">
           <div class="drag-area h-100" id="dropZone">
@@ -135,7 +168,7 @@
     </div>
 
     <div class="card p-4" id="formArea" style="display:none;">
-      <h5 class="mb-3">申請内容入力</h5>
+      <h5 class="mb-3">登録内容入力</h5>
       <div class="row">
         <!-- 左側：画像プレビュー -->
         <div class="col-md-3">
@@ -160,12 +193,12 @@
           <!-- ヘッダー情報 -->
           <div class="row g-3 mb-4 border-bottom pb-4">
             <div class="col-12">
-              <label class="form-label">申請区分 <span class="badge bg-danger">必須</span></label>
+              <label class="form-label">区分 <span class="badge bg-danger">必須</span></label>
               <div class="btn-group w-100" role="group">
-                <input type="radio" class="btn-check" name="appType" id="typeBusiness" value="営業" autocomplete="off">
-                <label class="btn btn-outline-primary" for="typeBusiness"><i class="fas fa-building me-2"></i>営業（小口）</label>
+                <input type="radio" class="btn-check" name="appType" id="typeBusiness" value="営業所" autocomplete="off">
+                <label class="btn btn-outline-primary" for="typeBusiness"><i class="fas fa-building me-2"></i>営業所</label>
                 <input type="radio" class="btn-check" name="appType" id="typePersonal" value="個人" autocomplete="off">
-                <label class="btn btn-outline-primary" for="typePersonal"><i class="fas fa-user me-2"></i>個人（立替）</label>
+                <label class="btn btn-outline-primary" for="typePersonal"><i class="fas fa-user me-2"></i>個人</label>
               </div>
             </div>
 
@@ -174,8 +207,8 @@
               <input type="date" class="form-control" id="formDate">
             </div>
             <div class="col-md-6">
-              <label class="form-label">支払先 <span class="badge bg-danger">必須</span></label>
-              <input type="text" class="form-control" id="formStore">
+              <label class="form-label">支払先</label>
+              <input type="text" class="form-control" id="formStore" placeholder="(任意)">
             </div>
             
             <div class="col-md-6">
@@ -199,12 +232,12 @@
                <table class="table table-bordered table-sm" id="detailsTable">
                  <thead class="table-light">
                    <tr>
-                     <th width="20%">勘定科目</th>
-                     <th width="25%">項目名</th>
-                     <th width="15%">金額(税込)</th>
+                     <th width="18%">勘定科目</th>
+                     <th width="22%">項目名</th>
+                     <th width="12%">金額(税込)</th>
                      <th width="15%">取引先</th>
-                     <th width="10%">人数</th>
-                     <th width="10%">日当</th>
+                     <th width="8%">人数</th>
+                     <th width="20%">日当・宿泊 <span class="badge bg-danger" style="font-size:0.65em">社長承認</span></th>
                      <th width="5%"></th>
                    </tr>
                  </thead>
@@ -229,7 +262,9 @@
           <div class="mt-4 d-flex justify-content-end align-items-center">
             <button class="btn btn-outline-danger me-auto" id="btnDelete" style="display:none;" onclick="deleteCurrentApp()"><i class="fas fa-trash-alt me-2"></i>削除</button>
             <button class="btn btn-secondary me-2" onclick="showView('apply'); resetApplyForm();">キャンセル</button>
-            <button class="btn btn-success" id="btnSubmit" onclick="submitApplication()"><i class="fas fa-paper-plane me-2"></i>申請する</button>
+            <button class="btn btn-primary" id="btnSubmit" onclick="submitApplication()">
+              <i class="fas fa-save me-2"></i>登録する
+            </button>
           </div>
         </div>
       </div>
@@ -239,10 +274,12 @@
   <div id="approvalListView" style="display:none;">
     <h3 class="mb-4">承認待ち案件</h3>
     <div class="card p-3">
-      <table class="table table-hover">
-        <thead><tr><th>申請者</th><th>利用日</th><th>支払先</th><th>合計金額</th><th>操作</th></tr></thead>
-        <tbody id="approvalListBody"></tbody>
-      </table>
+       <div class="d-flex justify-content-end mb-2">
+           <input type="text" class="form-control form-control-sm" id="filterApproval" placeholder="申請者名で絞り込み..." style="width: 250px;" onkeyup="filterGroupedApps('approvalListContainer', 'filterApproval')">
+       </div>
+       <div id="approvalListContainer">
+         <!-- グルーピング表示エリア -->
+       </div>
     </div>
   </div>
 
@@ -268,13 +305,12 @@
   </div>
 </div>
 
-<!-- 隠しDatalist: JSでマスタから動的生成 -->
+<!-- 隠しDatalist -->
 <datalist id="categoryList"></datalist>
-<datalist id="itemSuggestionList"></datalist>
 
 <script>
   // ==============================================
-  // MOCK for Preview Environment (GAS Emulation)
+  // MOCK for Preview Environment
   // ==============================================
   if (typeof google === 'undefined') {
     const mockRunner = {
@@ -286,59 +322,40 @@
           name: 'MockUser', email: 'test@example.com', role: '経理', canFix: true
         }), 500); 
       },
-      
       getDashboardData: function() { 
         setTimeout(() => this._success && this._success({
           user:{name:'MockUser', role:'経理', canFix:true}, 
           myApplications:[
-            {id:'100', useDate:'2025/01/01', store:'TestStore', amount:1000, status:'承認待ち', approver:'経理', canEdit: true},
-            {id:'101', useDate:'2025/01/05', store:'Store X', amount:5000, status:'差戻し', approver:'経理', canEdit: true},
+            {id:'100', date:'2025/01/01', useDate:'2025/01/01', store:'TestStore', amount:1000, status:'未申請', approver:'-', canEdit: true, canSubmit: true},
+            {id:'101', date:'2025/01/05', useDate:'2025/01/05', store:'Store X', amount:5000, status:'差戻し', approver:'-', canEdit: true, canSubmit: false},
+            {id:'102', date:'2025/01/06', useDate:'2025/01/06', store:'Store Y', amount:3000, status:'承認待ち', approver:'経理', canEdit: false, canSubmit: false}
           ],
           allApplications:[
-            {id:'100', user:'MockUser', useDate:'2025/01/01', store:'TestStore', amount:1000, status:'承認待ち', approver:'経理', canEdit: true},
-            {id:'999', user:'OtherUser', useDate:'2025/01/02', store:'Store A', amount:3000, status:'承認済', approver:'承認済', canEdit: false}
+            {id:'100', date:'2025/01/01', user:'MockUser', useDate:'2025/01/01', store:'TestStore', amount:1000, status:'未申請', approver:'-', canEdit: true},
+            {id:'999', date:'2025/01/01', user:'OtherUser', useDate:'2025/01/02', store:'Store A', amount:3000, status:'承認済', approver:'承認済', canEdit: false}
           ],
           approvalTasks:[
-             {id:'1', user:'部下A', useDate:'2025/01/02', store:'StoreB', category:'消耗品', amount:2000}
+             {id:'102', date:'2025/01/06', user:'MockUser', useDate:'2025/01/06', store:'Store Y', amount:3000, status:'承認待ち'}
           ]
         }), 500); 
       },
-      
-      getMasters: function() { 
-        setTimeout(() => this._success && this._success({accounts: ['旅費交通費','消耗品','交際費','会議費','新聞図書費']}), 500); 
-      },
-      
-      analyzeReceiptImage: function() { 
-        setTimeout(() => this._success && this._success({
+      getMasters: function() { setTimeout(() => this._success && this._success({accounts: ['旅費交通費','消耗品','交際費']}), 500); },
+      analyzeReceiptImage: function() { setTimeout(() => this._success && this._success({
           use_date:'2025-02-01', store_name:'Mock Store', total_amount:1200, item_name:'文房具',
-          category:'消耗品', has_invoice:true, summary_text:'[AI読取]\n日付:2025/02/01\n店名:Mock Store\n金額:1200円'
+          category:'消耗品', has_invoice:true, summary_text:'[AI読取]\nMock Data'
         }), 1000); 
       },
-      
       saveApplication: function(data) { setTimeout(() => this._success && this._success({success:true}), 1000); },
       updateApplication: function(data) { setTimeout(() => this._success && this._success({success:true}), 1000); },
       deleteApplication: function(id) { setTimeout(() => this._success && this._success({success:true}), 1000); },
+      submitBulkApplications: function(ids) { setTimeout(() => this._success && this._success({success:true, message: ids.length+'件送信'}), 500); },
       approveApplication: function() { setTimeout(() => this._success && this._success(), 500); },
       rejectApplication: function() { setTimeout(() => this._success && this._success(), 500); },
-      generateCSV: function() { setTimeout(() => this._success && this._success({base64: "SGVsbG8=", filename: "mock.csv"}), 500); },
-      getSpreadsheetUrl: function() { setTimeout(() => this._success && this._success("https://google.com"), 500); },
-      
-      predictCategoryByItem: function(item) { 
-        setTimeout(() => this._success && this._success(item.includes('タクシー') ? '旅費交通費' : '消耗品'), 200); 
-      },
-      
-      suggestItemsByCategory: function(cat) { 
-        setTimeout(() => this._success && this._success(cat === '旅費交通費' ? ['タクシー代','電車代'] : ['ペン','ノート']), 200); 
-      },
-      
       getApplicationDetail: function(id) {
           setTimeout(() => this._success && this._success({
-              id: id, appType: '営業', useDate: '2025-01-01', storeName: 'Edit Store', totalAmount: 1100,
-              memo: 'Test Memo', hasInvoice: true, 
-              items: [
-                 { category: '消耗品', itemName: 'ペン', total_price: 110, client: '', participants: '', isAllowance: false },
-                 { category: '消耗品', itemName: 'ノート', total_price: 990, client: '', participants: '', isAllowance: false }
-              ]
+              id: id, appType: '営業所', useDate: '2025-01-01', storeName: 'Edit Store', totalAmount: 1100,
+              memo: 'Test Memo', hasInvoice: true, fileName: 'test.png', fileBase64: 'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', mimeType:'image/png',
+              items: [{ category: '消耗品', itemName: 'ペン', total_price: 1100, client: '', participants: '', isAllowance: false }]
           }), 500);
       }
     };
@@ -353,16 +370,13 @@
   let currentFileName = null;
   let currentMimeType = null;
   let currentEditingId = null;
-  let accountMasters = []; // 勘定科目リスト
+  let accountMasters = []; 
 
-  // 初期ロード
   window.onload = function() { loadUser(); };
 
-  // --- 共通: ユーザーロード ---
   function loadUser(manualEmail = null) {
     showLoading(true);
-    google.script.run
-      .withSuccessHandler(user => {
+    google.script.run.withSuccessHandler(user => {
         if (user.role === 'UNREGISTERED') {
           showLoading(false);
           document.getElementById('unregisteredView').style.display = 'block';
@@ -378,24 +392,18 @@
         showView('apply');
         loadMasters();
         showLoading(false);
-      })
-      .withFailureHandler(err => {
+      }).withFailureHandler(err => {
         document.getElementById('dashboardView').style.display = 'none';
         document.getElementById('loginView').style.display = 'block';
         showLoading(false);
-      })
-      .getCurrentUser(manualEmail);
+      }).getCurrentUser(manualEmail);
   }
 
   function manualLogin() {
     const email = document.getElementById('inputEmail').value;
-    if(email) {
-      document.getElementById('loginView').style.display = 'none';
-      loadUser(email);
-    }
+    if(email) { document.getElementById('loginView').style.display = 'none'; loadUser(email); }
   }
 
-  // --- 画面切り替え ---
   function showView(viewId) {
     ['dashboardView','applyView','approvalListView','adminView','unregisteredView'].forEach(id => document.getElementById(id).style.display = 'none');
     document.querySelectorAll('.nav-link').forEach(el => el.classList.remove('active'));
@@ -409,7 +417,6 @@
     if (viewId === 'admin') google.script.run.withSuccessHandler(url => document.getElementById('spreadsheetLink').href = url).getSpreadsheetUrl();
   }
 
-  // --- マスタロード ---
   function loadMasters() {
     google.script.run.withSuccessHandler(data => {
       accountMasters = data.accounts;
@@ -427,47 +434,156 @@
   function loadDashboard() {
     if(!currentUser) return;
     google.script.run.withSuccessHandler(data => {
+      // 1. マイ申請履歴 (一括申請対応)
       const myTbody = document.getElementById('myAppList');
-      myTbody.innerHTML = renderTableRows(data.myApplications);
+      myTbody.innerHTML = renderMyTableRows(data.myApplications);
+      updateBulkButton();
 
+      // 2. 全申請履歴（経理） - グルーピング表示
       const allTabLi = document.getElementById('all-tab-li');
-      const allTbody = document.getElementById('allAppList');
-      
+      const allContainer = document.getElementById('allAppListContainer');
       if (currentUser.role === '経理') {
           allTabLi.style.display = 'block';
-          allTbody.innerHTML = renderTableRows(data.allApplications, true);
+          allContainer.innerHTML = renderGroupedList(data.allApplications, true);
       } else {
           allTabLi.style.display = 'none';
-          allTbody.innerHTML = '';
+          allContainer.innerHTML = '';
       }
 
-      const appTbody = document.getElementById('approvalListBody');
+      // 3. 承認タスク - グルーピング表示
+      const appContainer = document.getElementById('approvalListContainer');
       document.getElementById('badgeCount').textContent = data.approvalTasks.length;
-      appTbody.innerHTML = data.approvalTasks.length ? data.approvalTasks.map(task => `
-        <tr><td>${task.user}</td><td>${task.useDate}</td><td>${task.store}</td>
-        <td>¥${Number(task.amount).toLocaleString()}</td><td>
-        <button class="btn btn-sm btn-primary" onclick="approveApp('${task.id}')">承認</button>
-        <button class="btn btn-sm btn-outline-danger" onclick="rejectApp('${task.id}')">差戻し</button></td></tr>`).join('') : '<tr><td colspan="5" class="text-center">なし</td></tr>';
+      if (data.approvalTasks.length) {
+         appContainer.innerHTML = renderGroupedList(data.approvalTasks, true, true);
+      } else {
+         appContainer.innerHTML = '<div class="text-center p-3">なし</div>';
+      }
+
     }).getDashboardData(currentUser.email);
   }
   
-  function renderTableRows(rows, showUser = false) {
-    if (!rows || rows.length === 0) return `<tr><td colspan="${showUser ? 7 : 6}" class="text-center">なし</td></tr>`;
+  // マイ申請用レンダリング（チェックボックス付き）
+  function renderMyTableRows(rows) {
+    if (!rows || rows.length === 0) return `<tr><td colspan="7" class="text-center">なし</td></tr>`;
     return rows.map(app => `
-        <tr>
-          ${showUser ? `<td>${app.user}</td>` : ''}
+        <tr class="search-row">
+          <td class="text-center">
+             ${app.canSubmit ? `<input type="checkbox" class="form-check-input bulk-check" value="${app.id}" onclick="updateBulkButton()">` : ''}
+          </td>
           <td>${app.useDate}</td>
           <td>${app.store}</td>
           <td>¥${Number(app.amount).toLocaleString()}</td>
-          <td><span class="badge bg-${getStatusColor(app.status)}">${app.status}</span></td>
+          <td><span class="badge bg-${getStatusColor(app.status)} status-badge">${app.status}</span></td>
           <td>${app.approver}</td>
           <td>
-            ${app.canEdit ? `<button class="btn btn-sm btn-outline-primary" onclick="editApplication('${app.id}')">修正</button>` : '-'}
+             <div class="btn-group" role="group">
+                ${app.canEdit ? `<button class="btn btn-sm btn-outline-primary" onclick="editApplication('${app.id}')">修正</button>` : ''}
+                ${!app.canEdit && !app.canSubmit ? '-' : ''}
+             </div>
           </td>
         </tr>`).join('');
   }
 
-  function getStatusColor(s) { return {承認済:'success',承認待ち:'warning',差戻し:'danger'}[s] || 'secondary'; }
+  // グルーピングリストレンダリング
+  function renderGroupedList(rows, showUser = false, isApproval = false) {
+      if (!rows || rows.length === 0) return '<div class="text-center p-3">データなし</div>';
+      
+      // 日付でグルーピング
+      const grouped = {};
+      rows.forEach(item => {
+          const d = item.date || '日付不明'; // 登録日等
+          if (!grouped[d]) grouped[d] = [];
+          grouped[d].push(item);
+      });
+      
+      const dates = Object.keys(grouped).sort().reverse(); // 新しい日付順
+      
+      return dates.map(date => `
+        <div class="group-section">
+            <div class="group-header">
+                <span>${date}</span>
+                <span class="badge bg-secondary">${grouped[date].length}件</span>
+            </div>
+            <table class="table table-hover table-sm align-middle mb-0" style="background: white;">
+                <thead>
+                    <tr><th>申請者</th><th>利用日</th><th>支払先</th><th>合計金額</th><th>ステータス</th><th>承認者</th><th>操作</th></tr>
+                </thead>
+                <tbody>
+                    ${grouped[date].map(app => `
+                        <tr class="group-row">
+                            <td class="user-cell fw-bold">${app.user}</td>
+                            <td>${app.useDate}</td>
+                            <td>${app.store}</td>
+                            <td>¥${Number(app.amount).toLocaleString()}</td>
+                            <td><span class="badge bg-${getStatusColor(app.status)}">${app.status}</span></td>
+                            <td>${app.approver}</td>
+                            <td>
+                                ${isApproval ? 
+                                    `<button class="btn btn-sm btn-primary me-1" onclick="approveApp('${app.id}')">承認</button>
+                                     <button class="btn btn-sm btn-outline-danger" onclick="rejectApp('${app.id}')">差戻し</button>` 
+                                    : (app.canEdit ? `<button class="btn btn-sm btn-outline-primary" onclick="editApplication('${app.id}')">修正</button>` : '-')
+                                }
+                            </td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
+      `).join('');
+  }
+
+  function getStatusColor(s) { return {承認済:'success',承認待ち:'warning',差戻し:'danger',未申請:'secondary'}[s] || 'secondary'; }
+  
+  // マイ申請の一括選択制御
+  function toggleAllChecks(source) {
+      document.querySelectorAll('.bulk-check').forEach(c => c.checked = source.checked);
+      updateBulkButton();
+  }
+  
+  function updateBulkButton() {
+      const count = document.querySelectorAll('.bulk-check:checked').length;
+      const btn = document.getElementById('btnBulkSubmit');
+      btn.disabled = count === 0;
+      btn.innerHTML = `<i class="fas fa-paper-plane me-2"></i>選択した${count}件を一括申請`;
+  }
+  
+  // 一括申請実行
+  function submitBulk() {
+      const ids = Array.from(document.querySelectorAll('.bulk-check:checked')).map(c => c.value);
+      if (ids.length === 0) return;
+      if (!confirm(`${ids.length}件のデータを経理へ申請しますか？`)) return;
+      
+      showLoading(true, '一括申請中...');
+      google.script.run.withSuccessHandler(res => {
+          alert(res.message);
+          loadDashboard();
+          showLoading(false);
+      }).withFailureHandler(err => {
+          alert('エラー: ' + err.message);
+          showLoading(false);
+      }).submitBulkApplications(ids);
+  }
+
+  // 経理・承認用フィルタ (グルーピング対応)
+  function filterGroupedApps(containerId, inputId = 'filterInput') {
+    const val = document.getElementById(inputId).value.toLowerCase();
+    const container = document.getElementById(containerId);
+    
+    container.querySelectorAll('.group-section').forEach(section => {
+        let hasVisibleRow = false;
+        section.querySelectorAll('.group-row').forEach(row => {
+            const userText = row.querySelector('.user-cell').textContent.toLowerCase();
+            if (userText.includes(val)) {
+                row.style.display = '';
+                hasVisibleRow = true;
+            } else {
+                row.style.display = 'none';
+            }
+        });
+        // グループ内に表示行がなければヘッダーごと隠す
+        section.style.display = hasVisibleRow ? '' : 'none';
+    });
+  }
 
   // --- ファイルアップロード & AI解析 ---
   const dropZone = document.getElementById('dropZone');
@@ -489,7 +605,7 @@
     document.getElementById('noImageMessage').style.display = 'block';
     if (!currentEditingId) {
        clearFormFields();
-       addDetailRow(); // 1行目は空で追加
+       addDetailRow(); 
     }
   }
 
@@ -518,7 +634,6 @@
       document.getElementById('checkInvoice').checked = data.has_invoice || false;
       document.getElementById('formMemo').value = data.summary_text || '';
       
-      // 明細エリアクリアして1行追加
       document.getElementById('detailsBody').innerHTML = '';
       addDetailRow({
          category: data.category || '',
@@ -529,7 +644,6 @@
       });
       calcTableTotal();
 
-      // カテゴリ推測補完 (AIが返していない場合)
       if (!data.category && data.item_name) {
          google.script.run.withSuccessHandler(cat => {
             if(cat) {
@@ -550,28 +664,29 @@
      const tbody = document.getElementById('detailsBody');
      const tr = document.createElement('tr');
      tr.className = 'detail-row';
+     
+     // 「日当・宿泊」の値復元（booleanまたは文字列に対応）
+     let selectedVal = "";
+     if (data && data.isAllowance) {
+         if (data.isAllowance === true || data.isAllowance === "true") selectedVal = "日当"; // boolean互換のデフォルト
+         else selectedVal = data.isAllowance; // 文字列の場合はそのまま
+     }
+
      tr.innerHTML = `
-        <td>
-           <input type="text" class="form-control form-control-sm detail-cat" list="categoryList" value="${data ? data.category : ''}" placeholder="科目">
-        </td>
-        <td>
-           <input type="text" class="form-control form-control-sm detail-item" value="${data ? data.itemName : ''}" placeholder="品代など">
-        </td>
-        <td>
-           <input type="number" class="form-control form-control-sm detail-price" value="${data ? data.total_price : ''}" oninput="calcTableTotal()">
-        </td>
-        <td>
-           <input type="text" class="form-control form-control-sm detail-client" value="${data ? data.client : ''}">
-        </td>
-        <td>
-           <input type="number" class="form-control form-control-sm detail-people" value="${data ? data.participants : ''}">
-        </td>
+        <td><input type="text" class="form-control form-control-sm detail-cat" list="categoryList" value="${data ? data.category : ''}" placeholder="科目"></td>
+        <td><input type="text" class="form-control form-control-sm detail-item" value="${data ? data.itemName : ''}" placeholder="品代など"></td>
+        <td><input type="number" class="form-control form-control-sm detail-price" value="${data ? data.total_price : ''}" oninput="calcTableTotal()"></td>
+        <td><input type="text" class="form-control form-control-sm detail-client" value="${data ? data.client : ''}"></td>
+        <td><input type="number" class="form-control form-control-sm detail-people" value="${data ? data.participants : ''}"></td>
         <td class="text-center">
-           <input type="checkbox" class="form-check-input detail-allowance" ${data && data.isAllowance ? 'checked' : ''}>
+           <select class="form-select form-select-sm detail-allowance">
+              <option value="">なし</option>
+              <option value="日当" ${selectedVal === '日当' ? 'selected' : ''}>日当</option>
+              <option value="宿泊" ${selectedVal === '宿泊' ? 'selected' : ''}>宿泊</option>
+              <option value="日当・宿泊" ${selectedVal === '日当・宿泊' ? 'selected' : ''}>日当・宿泊</option>
+           </select>
         </td>
-        <td class="text-center">
-           <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeDetailRow(this)"><i class="fas fa-times"></i></button>
-        </td>
+        <td class="text-center"><button type="button" class="btn btn-sm btn-outline-danger" onclick="removeDetailRow(this)"><i class="fas fa-times"></i></button></td>
      `;
      tbody.appendChild(tr);
      calcTableTotal();
@@ -589,13 +704,15 @@
 
   function calcTableTotal() {
      let sum = 0;
-     document.querySelectorAll('.detail-price').forEach(input => {
-        sum += Number(input.value) || 0;
-     });
+     document.querySelectorAll('.detail-price').forEach(input => { sum += Number(input.value) || 0; });
      document.getElementById('calcTotal').textContent = sum.toLocaleString();
      
-     // 領収書合計と比較
-     const headerTotal = Number(document.getElementById('formTotalAmount').value) || 0;
+     // 領収書合計への自動反映
+     const totalInput = document.getElementById('formTotalAmount');
+     if(totalInput) totalInput.value = sum;
+
+     // チェック（自動反映されるため通常は一致するが、手入力時のために残す）
+     const headerTotal = Number(totalInput.value) || 0;
      const alertEl = document.getElementById('amountAlert');
      if (headerTotal !== 0 && headerTotal !== sum) {
         alertEl.style.display = 'inline';
@@ -603,7 +720,6 @@
         alertEl.style.display = 'none';
      }
   }
-  
   document.getElementById('formTotalAmount').addEventListener('input', calcTableTotal);
 
   // --- 修正機能 ---
@@ -611,18 +727,29 @@
     showLoading(true, 'データ取得中...');
     google.script.run.withSuccessHandler(data => {
         currentEditingId = id;
-        document.getElementById('applyViewTitle').textContent = '申請内容の修正・分解';
-        document.getElementById('btnSubmit').innerHTML = '<i class="fas fa-sync-alt me-2"></i>修正する';
+        document.getElementById('applyViewTitle').textContent = '登録内容の修正';
+        document.getElementById('btnSubmit').innerHTML = '<i class="fas fa-save me-2"></i>修正登録する';
         document.getElementById('btnDelete').style.display = 'block';
         
         showView('apply');
         document.getElementById('uploadArea').style.display = 'none';
         document.getElementById('formArea').style.display = 'block';
         
-        document.getElementById('previewContainer').style.display = 'none'; 
-        document.getElementById('noImageMessage').style.display = 'block';
-        document.getElementById('noImageMessage').textContent = '登録済みの画像は保持されます';
-        document.getElementById('editImageUpload').style.display = 'block';
+        // 画像プレビュー処理
+        if (data.fileBase64) {
+             currentFileBase64 = data.fileBase64;
+             currentMimeType = data.mimeType;
+             currentFileName = data.fileName;
+             document.getElementById('previewImg').src = `data:${data.mimeType};base64,${data.fileBase64}`;
+             document.getElementById('previewContainer').style.display = 'block';
+             document.getElementById('noImageMessage').style.display = 'none';
+             document.getElementById('editImageUpload').style.display = 'block';
+        } else {
+             document.getElementById('previewContainer').style.display = 'none'; 
+             document.getElementById('noImageMessage').style.display = 'block';
+             document.getElementById('noImageMessage').textContent = '登録済みの画像はありません';
+             document.getElementById('editImageUpload').style.display = 'block';
+        }
 
         // ヘッダーセット
         document.getElementById('formDate').value = data.useDate;
@@ -649,17 +776,14 @@
     }).getApplicationDetail(id);
   }
 
-  // --- 申請送信 ---
+  // --- 登録（保存）処理 ---
   function submitApplication() {
-    // バリデーション
     if(!document.getElementById('formDate').value) return alert('利用日を入力してください');
-    if(!document.getElementById('formStore').value) return alert('支払先を入力してください');
     if(!document.getElementById('formTotalAmount').value) return alert('合計金額を入力してください');
     
     const appTypeEl = document.querySelector('input[name="appType"]:checked');
-    if (!appTypeEl) return alert('申請区分（営業/個人）を選択してください');
+    if (!appTypeEl) return alert('区分（営業所/個人）を選択してください');
 
-    // 金額チェック
     const headerTotal = Number(document.getElementById('formTotalAmount').value);
     let detailTotal = 0;
     const items = [];
@@ -669,9 +793,7 @@
        const cat = tr.querySelector('.detail-cat').value;
        const name = tr.querySelector('.detail-item').value;
        const price = Number(tr.querySelector('.detail-price').value);
-       
        if (!name || price === 0) hasError = true;
-
        detailTotal += price;
        items.push({
           category: cat,
@@ -679,35 +801,36 @@
           total_price: price,
           client: tr.querySelector('.detail-client').value,
           participants: tr.querySelector('.detail-people').value,
-          isAllowance: tr.querySelector('.detail-allowance').checked
+          // セレクトボックスの値をそのまま送信（文字列または空文字）
+          isAllowance: tr.querySelector('.detail-allowance').value
        });
     });
 
     if (hasError) return alert('明細の項目名と金額は必須です');
     if (headerTotal !== detailTotal) {
-       if(!confirm(`領収書合計(${headerTotal}円)と明細合計(${detailTotal}円)が一致しませんが、このまま申請しますか？\n(通常は一致させる必要があります)`)) return;
+       if(!confirm(`領収書合計(${headerTotal}円)と明細合計(${detailTotal}円)が一致しませんが、このまま登録しますか？`)) return;
     }
 
-    const actionName = currentEditingId ? '修正' : '申請';
-    if(!confirm(`${actionName}しますか？`)) return;
+    const actionName = currentEditingId ? '修正登録' : '新規登録';
+    if(!confirm(`${actionName}しますか？\n(まだ申請は完了しません。ダッシュボードから申請を行ってください)`)) return;
     
-    showLoading(true, '送信中...');
+    showLoading(true, '保存中...');
 
     const formData = {
       id: currentEditingId || null, 
       appType: appTypeEl.value,
       useDate: document.getElementById('formDate').value,
       userName: currentUser.name,
-      storeName: document.getElementById('formStore').value,
+      storeName: document.getElementById('formStore').value || '',
       totalAmount: headerTotal,
       memo: document.getElementById('formMemo').value,
       fileName: currentFileName || '', fileBase64: currentFileBase64, mimeType: currentMimeType,
       hasInvoice: document.getElementById('checkInvoice').checked,
-      items: items // 明細配列
+      items: items 
     };
 
     const run = google.script.run.withSuccessHandler(res => {
-        alert(currentEditingId ? '修正完了しました' : '申請完了');
+        alert(res.message);
         showLoading(false);
         resetApplyForm(); 
         showView('dashboard');
@@ -726,7 +849,7 @@
   // --- 削除 ---
   function deleteCurrentApp() {
     if (!currentEditingId) return;
-    if (!confirm('本当にこの申請を削除しますか？\n（この操作は取り消せません）')) return;
+    if (!confirm('本当にこのデータを削除しますか？')) return;
 
     showLoading(true, '削除中...');
     google.script.run.withSuccessHandler(res => {
@@ -746,7 +869,7 @@
     document.getElementById('checkInvoice').checked = false;
     document.querySelectorAll('input[name="appType"]').forEach(el => el.checked = false);
     document.getElementById('editFileInput').value = '';
-    document.getElementById('detailsBody').innerHTML = ''; // 明細クリア
+    document.getElementById('detailsBody').innerHTML = ''; 
     document.getElementById('calcTotal').textContent = '0';
     document.getElementById('amountAlert').style.display = 'none';
   }
@@ -754,8 +877,8 @@
   function resetApplyForm() {
     currentEditingId = null;
     currentFileBase64 = null; currentFileName = null;
-    document.getElementById('applyViewTitle').textContent = '経費申請';
-    document.getElementById('btnSubmit').innerHTML = '<i class="fas fa-paper-plane me-2"></i>申請する';
+    document.getElementById('applyViewTitle').textContent = '経費データ登録';
+    document.getElementById('btnSubmit').innerHTML = '<i class="fas fa-save me-2"></i>登録する';
     document.getElementById('btnDelete').style.display = 'none';
     document.getElementById('uploadArea').style.display = 'block';
     document.getElementById('formArea').style.display = 'none';
