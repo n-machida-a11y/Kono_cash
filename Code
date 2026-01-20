@@ -1,6 +1,6 @@
 /**
  * 現金経費精算アプリ - サーバーサイドスクリプト
- * v12.0: ゲスト申請・AI学習強化・一括ドラフト作成対応版
+ * v17.0: 管理者用一括操作・仕訳CSV出力機能強化
  */
 
 // 定数定義：シート名
@@ -19,12 +19,18 @@ const STATUS = {
   DRAFT: '未申請',
   PENDING: '承認待ち',
   APPROVED: '承認済',
-  REJECTED: '差戻し'
+  REJECTED: '差戻し',
+  CHECKED: '確認済み',      // 追加: 経理チェック済
+  EXPORTED: 'CSV出力済み'  // 追加: 完了
 };
 
-// APIキー設定
+// 領収書シートの列インデックス (0始まり)
+const R_COLS = {
+  ID: 0, DATE: 1, APP_TYPE: 2, USE_DATE: 3, USER: 4, STORE: 5, AMOUNT: 6, MEMO: 7, STATUS: 11, APPROVER: 12
+};
+
+// APIキー・フォルダ設定
 const GEMINI_API_KEY = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY') || '';
-// 領収書保存先フォルダID
 const RECEIPT_FOLDER_ID = PropertiesService.getScriptProperties().getProperty('RECEIPT_FOLDER_ID') || '';
 
 function doGet(e) {
@@ -42,9 +48,9 @@ function setupSpreadsheet() {
   const headers = {
     [SHEETS.RECEIPTS]: ['登録ID', '登録日時', '申請区分', '利用日', '使用者', '支払先', '合計金額', 'メモ', 'ファイル名', 'ファイルID', 'インボイス有無', 'ステータス', '現在の承認者'],
     [SHEETS.DETAILS]: ['明細ID', '親登録ID', '勘定科目', '項目名', '日当・宿泊', '取引先', '参加人数', '金額(税込)', '税抜', '消費税', 'メモ'],
-    [SHEETS.ACCOUNTS]: ['科目名', 'メモ'],
-    [SHEETS.USERS]: ['氏名', 'メールアドレス', '権限', '銀行コード', '修正可否'],
-    [SHEETS.LEARNING]: ['キーワード', '正解勘定科目', '登録回数', '種別'], // 種別列を追加
+    [SHEETS.ACCOUNTS]: ['科目名', '科目コード'],
+    [SHEETS.USERS]: ['氏名', 'メールアドレス', '権限', '銀行コード', '修正可否', '役職', '部門コード'],
+    [SHEETS.LEARNING]: ['キーワード', '正解勘定科目', '登録回数', '種別'], 
     [SHEETS.RULES]: ['ルールID', '優先順位', '対象科目', '金額条件', 'キーワード条件', '日当条件', '必須承認者ルート'],
     [SHEETS.CSV_CONFIG]: ['出力種別', '列順', 'ヘッダー名', '参照元', 'カラム名', 'フォーマット指定', '文字コード']
   };
@@ -68,143 +74,81 @@ function createColumnMap(headerRow) {
   return map;
 }
 
-// --- ユーザー認証 (ゲスト対応) ---
+// --- ユーザー認証 ---
 function getCurrentUser(manualEmail = null) {
   const email = manualEmail || Session.getActiveUser().getEmail();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(SHEETS.USERS);
   const data = sheet.getDataRange().getValues();
-  
   const colMap = createColumnMap(data[0]);
-  const idxName = colMap['氏名'];
-  const idxEmail = colMap['メールアドレス'];
-  const idxRole = colMap['権限'];
-  const idxCanFix = colMap['修正可否'];
 
   for (let i = 1; i < data.length; i++) {
-    if (idxEmail !== undefined && String(data[i][idxEmail]).trim().toLowerCase() === String(email).trim().toLowerCase()) {
-      
-      let canFix = false;
-      if (idxCanFix !== undefined) {
-        const val = String(data[i][idxCanFix]).trim();
-        if (val === '可' || val.toUpperCase() === 'TRUE') {
-          canFix = true;
-        }
-      }
-
+    if (String(data[i][colMap['メールアドレス']]).trim().toLowerCase() === String(email).trim().toLowerCase()) {
       return {
-        name: idxName !== undefined ? data[i][idxName] : '',
-        email: data[i][idxEmail],
-        role: idxRole !== undefined ? data[i][idxRole] : '',
-        canFix: canFix
+        name: data[i][colMap['氏名']],
+        email: data[i][colMap['メールアドレス']],
+        role: data[i][colMap['権限']],
+        position: data[i][colMap['役職']] || '',
+        canFix: String(data[i][colMap['修正可否']]).trim() === '可'
       };
     }
   }
-  
-  // ★変更: 未登録でも「ゲスト」として通過させる
-  return { 
-    name: '', // 名前は空にして画面で入力させる
-    email: email, 
-    role: 'ゲスト', 
-    canFix: true 
-  };
+  return { name: '', email: email, role: 'ゲスト', position: '', canFix: true };
 }
 
-function getSpreadsheetUrl() {
-  return SpreadsheetApp.getActiveSpreadsheet().getUrl();
-}
+function getSpreadsheetUrl() { return SpreadsheetApp.getActiveSpreadsheet().getUrl(); }
 
 // --- ダッシュボードデータ取得 ---
 function getDashboardData(userEmail) {
   const user = getCurrentUser(userEmail);
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const rSheet = ss.getSheetByName(SHEETS.RECEIPTS);
-  
+  const dSheet = ss.getSheetByName(SHEETS.DETAILS);
   const result = { user: user, myApplications: [], approvalTasks: [], allApplications: [] };
 
-  // ゲストの場合も自分の申請（emailまたは名前で紐づくもの）は見せたいが、
-  // 現状のロジックは「User名」の一致で見ているため、申請時に正しい名前を入力していれば表示される。
-  // ここではUnregisteredではじく処理は削除。
   if (rSheet.getLastRow() <= 1) return result;
 
-  const data = rSheet.getDataRange().getValues();
-  const colMap = createColumnMap(data[0]);
-  const rows = data.slice(1);
-  
-  // ユーザー名が未設定（ゲスト初期状態）の場合はマッチングできないので空文字扱い
-  const currentUserName = String(user.name).trim();
+  const rData = rSheet.getDataRange().getValues();
+  const rColMap = createColumnMap(rData[0]);
+  const dData = dSheet.getDataRange().getValues();
+  const dColMap = createColumnMap(dData[0]);
 
-  const idxId = colMap['登録ID'];
-  const idxDate = colMap['登録日時'];
-  const idxAppType = colMap['申請区分']; 
-  const idxUseDate = colMap['利用日'];
-  const idxUser = colMap['使用者'];
-  const idxStore = colMap['支払先'];
-  const idxAmount = colMap['合計金額'];
-  const idxStatus = colMap['ステータス'];
-  const idxApprover = colMap['現在の承認者'];
-
-  if (idxStatus === undefined || idxApprover === undefined) return result;
-
-  const myApplications = [];
-  const approvalTasks = [];
-  const allApplications = [];
-
-  rows.forEach((row) => {
-    const formatDateStr = (d) => d instanceof Date ? Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy/MM/dd') : String(d);
-    
-    const status = row[idxStatus];
-    const approver = String(row[idxApprover]).trim();
-    const rowUser = String(row[idxUser]).trim();
-
-    // 修正・申請可能か判定
-    const isStatusEditable = (status === STATUS.DRAFT) || (status === STATUS.REJECTED);
-    const canEdit = (isStatusEditable);
-    const canSubmit = (status === STATUS.DRAFT);
-
-    const item = {
-      id: row[idxId], 
-      date: formatDateStr(row[idxDate]), 
-      appType: idxAppType !== undefined ? row[idxAppType] : '', 
-      useDate: formatDateStr(row[idxUseDate]),
-      user: rowUser, 
-      store: row[idxStore], 
-      amount: row[idxAmount], 
-      category: '詳細', 
-      status: status, 
-      approver: approver,
-      canEdit: canEdit,
-      canSubmit: canSubmit
-    };
-
-    // 1. マイ申請履歴
-    // 登録名が一致、またはゲストでまだ名前が保存されていない場合も考慮（セッションベースの制御は今回簡易版なので名寄せのみ）
-    if (currentUserName && rowUser === currentUserName) {
-        myApplications.push(item);
-    } else if (!currentUserName && user.email === Session.getActiveUser().getEmail()) {
-        // ※ゲストの場合、名前が空だと一致しないため、厳密にはクッキーや別ロジックが必要だが、
-        // 今回は「申請時に名前を入力」するため、その名前がブラウザに残っている前提か、
-        // もしくは「ゲスト」ロールで全件表示などを避けるため、名前一致のみとする。
-        // (補足: 実運用ではゲストもCookie等で名前を保持するか、EmailをDBに記録することを推奨)
-    }
-    
-    // 2. 承認タスク
-    if (String(item.approver).trim() === String(user.role).trim() && item.status === STATUS.PENDING) {
-        approvalTasks.push(item);
-    }
-
-    // 3. 全申請履歴 (経理のみ)
-    if (user.role === '経理') {
-        allApplications.push(item);
-    }
-  });
-
-  result.myApplications = myApplications.reverse();
-  result.approvalTasks = approvalTasks.reverse(); 
-  if (user.role === '経理') {
-      result.allApplications = allApplications.reverse();
+  // 明細情報の紐付け準備
+  const detailMap = {};
+  for(let i=1; i<dData.length; i++){
+    const pid = String(dData[i][dColMap['親登録ID']]);
+    if(!detailMap[pid]) detailMap[pid] = [];
+    detailMap[pid].push({ category: dData[i][dColMap['勘定科目']] });
   }
 
+  rData.slice(1).forEach((row) => {
+    const formatDate = (d) => d instanceof Date ? Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy/MM/dd') : String(d);
+    const id = String(row[rColMap['登録ID']]);
+    const status = row[rColMap['ステータス']];
+    const rowUser = String(row[rColMap['使用者']]);
+
+    const item = {
+      id: id,
+      date: formatDate(row[rColMap['登録日時']]),
+      useDate: formatDate(row[rColMap['利用日']]),
+      user: rowUser,
+      store: row[rColMap['支払先']],
+      amount: row[rColMap['合計金額']],
+      status: status,
+      approver: row[rColMap['現在の承認者']],
+      category: detailMap[id] ? detailMap[id][0].category : '-',
+      canEdit: (status === STATUS.DRAFT || status === STATUS.REJECTED),
+      canSubmit: (status === STATUS.DRAFT)
+    };
+
+    if (rowUser === user.name) result.myApplications.push(item);
+    if (item.approver === user.role && status === STATUS.PENDING) result.approvalTasks.push(item);
+    if (['管理者','経理','社長'].includes(user.role)) result.allApplications.push(item);
+  });
+
+  result.myApplications.reverse();
+  result.approvalTasks.reverse();
+  result.allApplications.reverse();
   return result;
 }
 
@@ -213,827 +157,201 @@ function getApplicationDetail(id) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const rSheet = ss.getSheetByName(SHEETS.RECEIPTS);
   const dSheet = ss.getSheetByName(SHEETS.DETAILS);
-  
   const rData = rSheet.getDataRange().getValues();
   const rColMap = createColumnMap(rData[0]);
-  const idxId = rColMap['登録ID'];
-  const idxFileId = rColMap['ファイルID'];
 
   let receipt = null;
   let fileId = null;
 
   for (let i = 1; i < rData.length; i++) {
-    if (rData[i][idxId] == id) {
-      const formatDate = (d) => {
-        if (!d) return '';
-        if (d instanceof Date) return Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
-        return String(d).substr(0, 10);
-      };
-
-      fileId = rData[i][idxFileId];
-
+    if (String(rData[i][rColMap['登録ID']]) === id) {
+      fileId = rData[i][rColMap['ファイルID']];
       receipt = {
-        id: rData[i][idxId],
+        id: id,
         appType: rData[i][rColMap['申請区分']],
-        useDate: formatDate(rData[i][rColMap['利用日']]),
-        userName: rData[i][rColMap['使用者']], // 申請者名を追加
+        useDate: Utilities.formatDate(new Date(rData[i][rColMap['利用日']]), Session.getScriptTimeZone(), 'yyyy-MM-dd'),
+        userName: rData[i][rColMap['使用者']], 
         storeName: rData[i][rColMap['支払先']],
         totalAmount: rData[i][rColMap['合計金額']],
         memo: rData[i][rColMap['メモ']],
         hasInvoice: rData[i][rColMap['インボイス有無']],
-        fileName: rData[i][rColMap['ファイル名']],
-        items: [],
-        fileBase64: null,
-        mimeType: null
+        items: []
       };
       break;
     }
   }
 
-  if (!receipt) throw new Error('データが見つかりません');
-
-  if (fileId && fileId !== 'NO_FILE' && fileId !== 'SAVE_ERROR') {
+  if (fileId && fileId !== 'NO_FILE') {
     try {
       const file = DriveApp.getFileById(fileId);
-      const blob = file.getBlob();
-      receipt.fileBase64 = Utilities.base64Encode(blob.getBytes());
-      receipt.mimeType = blob.getContentType();
-    } catch (e) {
-      console.error('画像取得エラー:', e);
-    }
+      receipt.fileBase64 = Utilities.base64Encode(file.getBlob().getBytes());
+      receipt.mimeType = file.getBlob().getContentType();
+    } catch (e) {}
   }
 
   const dData = dSheet.getDataRange().getValues();
   const dColMap = createColumnMap(dData[0]);
-  const idxDParent = dColMap['親登録ID'];
-  
-  const detailRows = dData.slice(1).filter(row => row[idxDParent] == id);
-  
-  receipt.items = detailRows.map(row => ({
-    category: row[dColMap['勘定科目']] || '',
-    itemName: row[dColMap['項目名']] || '',
-    isAllowance: row[dColMap['日当・宿泊']] || false,
-    client: row[dColMap['取引先']] || '',
-    participants: row[dColMap['参加人数']] || '',
-    total_price: row[dColMap['金額(税込)']] || 0
+  receipt.items = dData.slice(1).filter(row => String(row[dColMap['親登録ID']]) === id).map(row => ({
+    category: row[dColMap['勘定科目']],
+    itemName: row[dColMap['項目名']],
+    total_price: row[dColMap['金額(税込)']],
+    memo: row[dColMap['メモ']]
   }));
-
-  if (receipt.items.length === 0) {
-    receipt.items.push({
-      category: '', itemName: '', total_price: receipt.totalAmount, 
-      isAllowance: false, client: '', participants: ''
-    });
-  }
 
   return receipt;
 }
 
-// --- 登録処理 (保存のみ・未申請状態) ---
+// --- 保存・更新系 ---
 function saveApplication(formData, itemsData) {
-  const lock = LockService.getScriptLock();
-  try {
-    lock.waitLock(30000); 
-
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const rSheet = ss.getSheetByName(SHEETS.RECEIPTS);
-    const dSheet = ss.getSheetByName(SHEETS.DETAILS);
-    const regId = Utilities.getUuid();
-    const now = new Date();
-    
-    let fileId = 'NO_FILE';
-    if (formData.fileBase64) {
-      try {
-        const folder = RECEIPT_FOLDER_ID ? DriveApp.getFolderById(RECEIPT_FOLDER_ID) : DriveApp.getRootFolder();
-        const blob = Utilities.newBlob(Utilities.base64Decode(formData.fileBase64), formData.mimeType, formData.fileName);
-        fileId = folder.createFile(blob).getId();
-      } catch (e) { console.error(e); fileId = 'SAVE_ERROR'; }
-    }
-
-    let finalItems = itemsData && itemsData.length > 0 ? itemsData : [{
-      itemName: formData.itemName || '明細なし',
-      total_price: formData.totalAmount,
-      category: formData.category,
-      isAllowance: formData.isAllowance,
-      client: formData.client,
-      participants: formData.participants
-    }];
-
-    const initialStatus = STATUS.DRAFT;
-    const firstApprover = '-';
-
-    // 学習データの更新（品目と店名）
-    finalItems.forEach(item => {
-        if (item.category) {
-            updateLearningData(item.itemName, item.category, 'CATEGORY');
-            // 店名があれば店名→科目の学習も行う
-            if (formData.storeName) {
-                updateLearningData(formData.storeName, item.category, 'STORE_TO_CATEGORY');
-            }
-        }
-    });
-
-    // 1. 領収書シート(Header)
-    const rHeaders = rSheet.getRange(1, 1, 1, rSheet.getLastColumn()).getValues()[0];
-    const rRowData = rHeaders.map(header => {
-      const h = String(header).trim();
-      switch(h) {
-        case '登録ID': return regId;
-        case '登録日時': return now;
-        case '申請区分': return formData.appType;
-        case '利用日': return formData.useDate;
-        case '使用者': return formData.userName; // 入力された氏名を使用
-        case '支払先': return formData.storeName;
-        case '合計金額': return formData.totalAmount;
-        case 'メモ': return formData.memo;
-        case 'ファイル名': return formData.fileName || '領収書なし';
-        case 'ファイルID': return fileId;
-        case 'インボイス有無': return formData.hasInvoice;
-        case 'ステータス': return initialStatus;
-        case '現在の承認者': return firstApprover;
-        default: return '';
-      }
-    });
-    rSheet.appendRow(rRowData);
-
-    // 2. 明細シート(Detail)
-    const dHeaders = dSheet.getRange(1, 1, 1, dSheet.getLastColumn()).getValues()[0];
-    finalItems.forEach(item => {
-      const price = Number(item.total_price);
-      const subtotal = Math.round(price / 1.1);
-      const tax = price - subtotal;
-
-      const dRowData = dHeaders.map(header => {
-        const h = String(header).trim();
-        switch(h) {
-          case '明細ID': return Utilities.getUuid();
-          case '親登録ID': return regId;
-          case '勘定科目': return item.category || '';
-          case '項目名': return item.itemName || '項目不明';
-          case '日当・宿泊': return item.isAllowance || false;
-          case '取引先': return item.client || '';
-          case '参加人数': return item.participants || '';
-          case '金額(税込)': return price;
-          case '税抜': return subtotal;
-          case '消費税': return tax;
-          case 'メモ': return ''; 
-          default: return '';
-        }
-      });
-      dSheet.appendRow(dRowData);
-    });
-    
-    SpreadsheetApp.flush();
-    return { success: true, message: '登録完了（ダッシュボードから申請してください）', id: regId };
-
-  } catch (e) {
-    throw new Error('保存エラー: ' + e.message);
-  } finally {
-    lock.releaseLock();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const rSheet = ss.getSheetByName(SHEETS.RECEIPTS);
+  const dSheet = ss.getSheetByName(SHEETS.DETAILS);
+  const regId = Utilities.getUuid();
+  const now = new Date();
+  
+  let fileId = 'NO_FILE';
+  if (formData.fileBase64) {
+    const blob = Utilities.newBlob(Utilities.base64Decode(formData.fileBase64), formData.mimeType, formData.fileName);
+    fileId = (RECEIPT_FOLDER_ID ? DriveApp.getFolderById(RECEIPT_FOLDER_ID) : DriveApp.getRootFolder()).createFile(blob).getId();
   }
+
+  rSheet.appendRow([regId, now, formData.appType, formData.useDate, formData.userName, formData.storeName, formData.totalAmount, formData.memo, formData.fileName, fileId, formData.hasInvoice, STATUS.DRAFT, '-']);
+
+  itemsData.forEach(item => {
+    dSheet.appendRow([Utilities.getUuid(), regId, item.category, item.itemName, false, '', '', item.total_price, 0, 0, item.memo]);
+  });
+  return { success: true, id: regId };
 }
 
-// 修正保存
 function updateApplication(formData) {
-  const lock = LockService.getScriptLock();
-  try {
-    lock.waitLock(30000); 
-
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const rSheet = ss.getSheetByName(SHEETS.RECEIPTS);
-    const dSheet = ss.getSheetByName(SHEETS.DETAILS);
-    const now = new Date();
-    const id = formData.id;
-
-    if (!id) throw new Error('更新対象のIDが指定されていません');
-
-    let fileId = null;
-    if (formData.fileBase64) {
-      try {
-        const folder = RECEIPT_FOLDER_ID ? DriveApp.getFolderById(RECEIPT_FOLDER_ID) : DriveApp.getRootFolder();
-        const blob = Utilities.newBlob(Utilities.base64Decode(formData.fileBase64), formData.mimeType, formData.fileName);
-        fileId = folder.createFile(blob).getId();
-      } catch (e) { console.error(e); }
-    }
-
-    const items = formData.items || [];
-
-    const rData = rSheet.getDataRange().getValues();
-    const rColMap = createColumnMap(rData[0]);
-    const idxId = rColMap['登録ID'];
-    let rowIndex = -1;
-
-    for (let i = 1; i < rData.length; i++) {
-      if (rData[i][idxId] == id) {
-        rowIndex = i + 1;
-        break;
-      }
-    }
-
-    if (rowIndex === -1) throw new Error('更新対象のデータが見つかりません');
-
-    const setVal = (colName, val) => {
-      const col = rColMap[colName];
-      if (col !== undefined) rSheet.getRange(rowIndex, col + 1).setValue(val);
-    };
-
-    setVal('登録日時', now); 
-    setVal('申請区分', formData.appType);
-    setVal('利用日', formData.useDate);
-    setVal('使用者', formData.userName); // 修正時も名前を更新（ゲストが名前を入れた場合など）
-    setVal('支払先', formData.storeName);
-    setVal('合計金額', formData.totalAmount);
-    setVal('メモ', formData.memo);
-    setVal('インボイス有無', formData.hasInvoice);
-    setVal('ステータス', STATUS.DRAFT);
-    setVal('現在の承認者', '-');
-
-    if (fileId) {
-       setVal('ファイル名', formData.fileName);
-       setVal('ファイルID', fileId);
-    }
-
-    const dData = dSheet.getDataRange().getValues();
-    const dColMap = createColumnMap(dData[0]);
-    const idxDParent = dColMap['親登録ID'];
-    
-    for (let i = dData.length - 1; i >= 1; i--) {
-      if (dData[i][idxDParent] == id) {
-        dSheet.deleteRow(i + 1);
-      }
-    }
-
-    const dHeaders = dSheet.getRange(1, 1, 1, dSheet.getLastColumn()).getValues()[0];
-    
-    items.forEach(item => {
-      // 学習データの更新
-      if (item.category) {
-          updateLearningData(item.itemName, item.category, 'CATEGORY');
-          if (formData.storeName) {
-              updateLearningData(formData.storeName, item.category, 'STORE_TO_CATEGORY');
-          }
-      }
-
-      const price = Number(item.total_price);
-      const subtotal = Math.round(price / 1.1);
-      const tax = price - subtotal;
-
-      const dRowData = dHeaders.map(header => {
-        const h = String(header).trim();
-        switch(h) {
-          case '明細ID': return Utilities.getUuid();
-          case '親登録ID': return id;
-          case '勘定科目': return item.category || '';
-          case '項目名': return item.itemName || '項目不明';
-          case '日当・宿泊': return item.isAllowance || false;
-          case '取引先': return item.client || '';
-          case '参加人数': return item.participants || '';
-          case '金額(税込)': return price;
-          case '税抜': return subtotal;
-          case '消費税': return tax;
-          case 'メモ': return ''; 
-          default: return '';
-        }
-      });
-      dSheet.appendRow(dRowData);
-    });
-    
-    SpreadsheetApp.flush();
-    return { success: true, message: '修正・登録完了（ダッシュボードから申請してください）', id: id };
-
-  } catch (e) {
-    throw new Error('更新エラー: ' + e.message);
-  } finally {
-    lock.releaseLock();
-  }
-}
-
-// --- ダッシュボードからの申請処理 (一括申請対応) ---
-function submitBulkApplications(ids) {
-  const lock = LockService.getScriptLock();
-  try {
-    lock.waitLock(30000);
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const rSheet = ss.getSheetByName(SHEETS.RECEIPTS);
-    const rData = rSheet.getDataRange().getValues();
-    const rColMap = createColumnMap(rData[0]);
-    
-    const idxId = rColMap['登録ID'];
-    const idxStatus = rColMap['ステータス'];
-    const idxApprover = rColMap['現在の承認者'];
-    const idxAmount = rColMap['合計金額'];
-
-    const dSheet = ss.getSheetByName(SHEETS.DETAILS);
-    const dData = dSheet.getDataRange().getValues();
-    const dColMap = createColumnMap(dData[0]);
-    const idxDParent = dColMap['親登録ID'];
-    const idxDCat = dColMap['勘定科目'];
-    const idxDItem = dColMap['項目名'];
-    const idxDAllow = dColMap['日当・宿泊'];
-    const idxDPrice = dColMap['金額(税込)'];
-
-    // IDごとの明細をグループ化
-    const detailsMap = {};
-    dData.slice(1).forEach(row => {
-        const pId = row[idxDParent];
-        if (!detailsMap[pId]) detailsMap[pId] = [];
-        detailsMap[pId].push({
-            category: row[idxDCat],
-            name: row[idxDItem],
-            isAllowance: row[idxDAllow],
-            total_price: row[idxDPrice]
-        });
-    });
-
-    let successCount = 0;
-
-    for (let i = 1; i < rData.length; i++) {
-      const id = rData[i][idxId];
-      if (ids.includes(String(id))) {
-        const currentStatus = rData[i][idxStatus];
-        if (currentStatus === STATUS.DRAFT || currentStatus === STATUS.REJECTED) {
-            
-            const amount = rData[i][idxAmount];
-            const items = detailsMap[id] || [];
-            
-            // ルート判定
-            const mainItem = items.reduce((prev, current) => (Number(prev.total_price) > Number(current.total_price)) ? prev : current, items[0] || {category:''});
-            const hasAllowance = items.some(it => it.isAllowance);
-            
-            const route = getApprovalRoute(mainItem.category, amount, items, hasAllowance);
-            const firstApprover = route.length > 0 ? route[0] : STATUS.APPROVED;
-            const nextStatus = firstApprover === STATUS.APPROVED ? STATUS.APPROVED : STATUS.PENDING;
-
-            rSheet.getRange(i + 1, idxStatus + 1).setValue(nextStatus);
-            rSheet.getRange(i + 1, idxApprover + 1).setValue(firstApprover);
-            successCount++;
-        }
-      }
-    }
-
-    SpreadsheetApp.flush();
-    return { success: true, message: `${successCount}件の申請を提出しました` };
-
-  } catch (e) {
-    throw new Error('申請エラー: ' + e.message);
-  } finally {
-    lock.releaseLock();
-  }
-}
-
-// 単一申請用
-function submitApplicationFromDashboard(id) {
-    return submitBulkApplications([id]);
-}
-
-// --- 申請削除処理 ---
-function deleteApplication(id) {
-  const lock = LockService.getScriptLock();
-  try {
-    lock.waitLock(30000);
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    
-    // 1. 領収書データの削除
-    const rSheet = ss.getSheetByName(SHEETS.RECEIPTS);
-    const rData = rSheet.getDataRange().getValues();
-    const rColMap = createColumnMap(rData[0]);
-    const idxRId = rColMap['登録ID'];
-    
-    let deleted = false;
-    for (let i = rData.length - 1; i >= 1; i--) {
-      if (rData[i][idxRId] == id) {
-        rSheet.deleteRow(i + 1);
-        deleted = true;
-        break; 
-      }
-    }
-    
-    if (!deleted) throw new Error('削除対象の申請が見つかりません');
-
-    // 2. 明細データの削除
-    const dSheet = ss.getSheetByName(SHEETS.DETAILS);
-    const dData = dSheet.getDataRange().getValues();
-    const dColMap = createColumnMap(dData[0]);
-    const idxDParent = dColMap['親登録ID'];
-
-    for (let i = dData.length - 1; i >= 1; i--) {
-      if (dData[i][idxDParent] == id) {
-        dSheet.deleteRow(i + 1);
-      }
-    }
-    
-    return { success: true, message: '削除しました' };
-
-  } catch(e) {
-    throw new Error('削除エラー: ' + e.message);
-  } finally {
-    lock.releaseLock();
-  }
-}
-
-// --- 承認処理 ---
-function approveApplication(id, userEmail) {
-  const lock = LockService.getScriptLock();
-  try {
-    lock.waitLock(30000);
-
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const rSheet = ss.getSheetByName(SHEETS.RECEIPTS);
-    const data = rSheet.getDataRange().getValues();
-    const colMap = createColumnMap(data[0]);
-
-    const idxId = colMap['登録ID'];
-    const idxApprover = colMap['現在の承認者'];
-    const idxStatus = colMap['ステータス'];
-    const idxAmount = colMap['合計金額'];
-    
-    const dSheet = ss.getSheetByName(SHEETS.DETAILS);
-    const dData = dSheet.getDataRange().getValues();
-    const dColMap = createColumnMap(dData[0]);
-    const idxDId = dColMap['親登録ID'];
-    const idxDCat = dColMap['勘定科目'];
-    const idxDItem = dColMap['項目名'];
-    const idxDAllow = dColMap['日当・宿泊'];
-    const idxDPrice = dColMap['金額(税込)'];
-
-    for (let i = 1; i < data.length; i++) {
-      if (data[i][idxId] == id) {
-        const currentRole = data[i][idxApprover];
-        
-        const items = dData.slice(1).filter(d => d[idxDId] == id).map(r => ({
-           category: r[idxDCat],
-           name: r[idxDItem],
-           isAllowance: r[idxDAllow],
-           total_price: r[idxDPrice]
-        }));
-        
-        const mainItem = items.reduce((prev, current) => (Number(prev.total_price) > Number(current.total_price)) ? prev : current, items[0] || {category:''});
-        const isAllowance = items.some(r => r.isAllowance);
-        const amount = data[i][idxAmount];
-
-        const route = getApprovalRoute(mainItem.category, amount, items, isAllowance);
-        const idx = route.indexOf(currentRole);
-        
-        if (idx !== -1 && idx < route.length - 1) {
-          rSheet.getRange(i + 1, idxApprover + 1).setValue(route[idx + 1]);
-        } else {
-          rSheet.getRange(i + 1, idxStatus + 1).setValue(STATUS.APPROVED);
-          rSheet.getRange(i + 1, idxApprover + 1).setValue(STATUS.APPROVED);
-        }
-        SpreadsheetApp.flush();
-        return { success: true };
-      }
-    }
-    return { success: false, message: 'データが見つかりません' };
-
-  } catch (e) {
-    throw new Error('承認エラー: ' + e.message);
-  } finally {
-    lock.releaseLock();
-  }
-}
-
-// --- 差戻し処理 ---
-function rejectApplication(id, comment) {
-  const lock = LockService.getScriptLock();
-  try {
-    lock.waitLock(30000);
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName(SHEETS.RECEIPTS);
-    const data = sheet.getDataRange().getValues();
-    const colMap = createColumnMap(data[0]);
-    
-    const idxId = colMap['登録ID'];
-    const idxStatus = colMap['ステータス'];
-    const idxMemo = colMap['メモ'];
-
-    for (let i = 1; i < data.length; i++) {
-      if (data[i][idxId] == id) {
-        if(idxStatus !== undefined) sheet.getRange(i + 1, idxStatus + 1).setValue(STATUS.REJECTED);
-        if(idxMemo !== undefined) {
-           const currentMemo = data[i][idxMemo];
-           sheet.getRange(i + 1, idxMemo + 1).setValue(currentMemo + `\n[差戻し理由] ${comment}`);
-        }
-        SpreadsheetApp.flush();
-        return { success: true };
-      }
-    }
-  } catch(e) {
-    throw new Error('エラー: ' + e.message);
-  } finally {
-    lock.releaseLock();
-  }
-}
-
-// --- AI解析 ---
-function analyzeReceiptImage(base64Image, mimeType) {
-  if (!GEMINI_API_KEY) throw new Error('Gemini APIキーが設定されていません。');
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=${GEMINI_API_KEY}`;
-  
-  const prompt = `
-    你是経理入力支援AIです。領収書画像を読み取り、以下のJSON形式で出力してください。
-    
-    【抽出ルール】
-    1. use_date: 利用日(YYYY-MM-DD)。不明なら今日。
-    2. store_name: 支払先・店名。
-    3. total_amount: 税込合計金額(数値)。
-    4. item_name: 最も代表的な但し書き・品目名(例: タクシー代、飲食代)。
-    5. category: 品目から推測される勘定科目(旅費交通費/交際費/消耗品/会議費/研修費/その他)。不明なら空文字。
-    6. client: 接待相手の社名や氏名(記載があれば)。なければ空文字。
-    7. participants: 参加人数(記載があれば数値)。なければ空文字。
-    8. has_invoice: Tから始まる13桁の登録番号があればtrue。
-    9. summary_text: 【重要】領収書の読み取り内容（日付、店名、金額、登録番号、品目など）を要約したテキストを作成してください。
-
-    出力例:
-    {
-      "use_date": "2024-04-01",
-      "store_name": "セブンイレブン",
-      "total_amount": 550,
-      "item_name": "文房具代",
-      "category": "消耗品",
-      "client": "",
-      "participants": "",
-      "has_invoice": true,
-      "summary_text": "[AI読取]\\n日付: 2024/04/01\\n店名: セブンイレブン..."
-    }
-    
-    JSONのみを返してください。
-  `;
-
-  const payload = { contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data: base64Image } }] }] };
-  const options = { method: 'post', contentType: 'application/json', payload: JSON.stringify(payload), muteHttpExceptions: true };
-
-  try {
-    const response = UrlFetchApp.fetch(url, options);
-    const json = JSON.parse(response.getContentText());
-    if (json.error) throw new Error(json.error.message);
-    let text = json.candidates[0].content.parts[0].text;
-    text = text.replace(/```json/g, '').replace(/```/g, '').trim();
-    return JSON.parse(text);
-  } catch (e) {
-    console.error('AI Error:', e);
-    throw new Error('AI解析失敗: ' + e.message);
-  }
-}
-
-// --- ★追加機能: ファイルアップロード & AI解析 & 下書き保存 (一括登録用) ---
-function uploadAndAnalyzeAndDraft(fileData) {
-  const lock = LockService.getScriptLock();
-  if (!lock.tryLock(30000)) throw new Error('サーバーが混み合っています。再試行してください。');
-  
-  try {
-    const user = getCurrentUser(fileData.userName); // 名前で取得を試みるが、なければゲストとして扱う
-
-    // 1. ファイル保存
-    let fileId = 'NO_FILE';
-    try {
-      const blob = Utilities.newBlob(Utilities.base64Decode(fileData.base64), fileData.mimeType, fileData.fileName);
-      const folder = RECEIPT_FOLDER_ID ? DriveApp.getFolderById(RECEIPT_FOLDER_ID) : DriveApp.getRootFolder();
-      fileId = folder.createFile(blob).getId();
-    } catch(e) {
-      console.error('File Save Error', e);
-    }
-
-    // 2. AI解析
-    let aiResult = {};
-    try {
-      aiResult = analyzeReceiptImage(fileData.base64, fileData.mimeType);
-    } catch (e) {
-      console.warn("AI解析失敗:", e);
-      // 解析失敗時はデフォルト値で下書き作成
-    }
-
-    // 3. DB保存 (下書きステータスで保存)
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const rSheet = ss.getSheetByName(SHEETS.RECEIPTS);
-    const dSheet = ss.getSheetByName(SHEETS.DETAILS);
-    const regId = Utilities.getUuid();
-    const now = new Date();
-    
-    // 申請者名：登録ユーザーならその名前、ゲストなら引数のuserName(空なら空文字)
-    const applicantName = user.role !== 'ゲスト' ? user.name : (fileData.userName || '');
-
-    const rRow = [
-      regId,
-      now,
-      '営業所', // デフォルト値
-      aiResult.use_date || now,
-      applicantName,
-      aiResult.store_name || '',
-      aiResult.total_amount || 0,
-      aiResult.summary_text || '',
-      fileData.fileName,
-      fileId,
-      aiResult.has_invoice ? true : false,
-      STATUS.DRAFT, // ★未申請として保存
-      '-'
-    ];
-    rSheet.appendRow(rRow);
-
-    const price = Number(aiResult.total_amount) || 0;
-    const subtotal = Math.round(price / 1.1);
-    const tax = price - subtotal;
-    
-    const dRow = [
-      Utilities.getUuid(),
-      regId,
-      aiResult.category || '',
-      aiResult.item_name || '品代',
-      false,
-      aiResult.client || '',
-      aiResult.participants || '',
-      price,
-      subtotal,
-      tax,
-      ''
-    ];
-    dSheet.appendRow(dRow);
-    
-    // AI学習データの更新 (店名・品目)
-    if (aiResult.category) {
-        if (aiResult.item_name) updateLearningData(aiResult.item_name, aiResult.category, 'CATEGORY');
-        if (aiResult.store_name) updateLearningData(aiResult.store_name, aiResult.category, 'STORE_TO_CATEGORY');
-    }
-    
-    return { success: true, id: regId, fileId: fileId };
-
-  } catch(e) {
-    throw new Error('処理エラー: ' + e.message);
-  } finally {
-    lock.releaseLock();
-  }
-}
-
-
-// --- 学習データ関連 (拡張) ---
-function updateLearningData(key, value, type = 'CATEGORY') {
-  if (!key || !value) return;
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(SHEETS.LEARNING);
-  // 列構成: [キーワード, 正解値, 回数, 種別]
-  // 簡易的に追記 (本来はUpsertが望ましい)
-  sheet.appendRow([key, value, 1, type]);
+  const rSheet = ss.getSheetByName(SHEETS.RECEIPTS);
+  const dSheet = ss.getSheetByName(SHEETS.DETAILS);
+  const rData = rSheet.getDataRange().getValues();
+  const rColMap = createColumnMap(rData[0]);
+  
+  let rowIndex = -1;
+  for(let i=1; i<rData.length; i++) if(String(rData[i][rColMap['登録ID']]) === formData.id) { rowIndex = i + 1; break; }
+  if(rowIndex === -1) throw new Error('データなし');
+
+  rSheet.getRange(rowIndex, rColMap['利用日'] + 1).setValue(formData.useDate);
+  rSheet.getRange(rowIndex, rColMap['支払先'] + 1).setValue(formData.storeName);
+  rSheet.getRange(rowIndex, rColMap['合計金額'] + 1).setValue(formData.totalAmount);
+  rSheet.getRange(rowIndex, rColMap['メモ'] + 1).setValue(formData.memo);
+
+  // 明細差し替え
+  const dData = dSheet.getDataRange().getValues();
+  const dColMap = createColumnMap(dData[0]);
+  for(let i=dData.length-1; i>=1; i--) if(String(dData[i][dColMap['親登録ID']]) === formData.id) dSheet.deleteRow(i+1);
+  formData.items.forEach(item => {
+    dSheet.appendRow([Utilities.getUuid(), formData.id, item.category, item.itemName, false, '', '', item.total_price, 0, 0, item.memo]);
+  });
+  return { success: true };
 }
 
-// 汎用予測関数
-function predictCategory(text, type = 'CATEGORY') {
+// --- 管理者用アクション ---
+function checkBulk(ids) { return updateStatusBulk(ids, STATUS.CHECKED); }
+function markAsExported(ids) { return updateStatusBulk(ids, STATUS.EXPORTED); }
+
+function updateStatusBulk(ids, newStatus) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(SHEETS.LEARNING);
+  const sheet = ss.getSheetByName(SHEETS.RECEIPTS);
   const data = sheet.getDataRange().getValues();
-  const counts = {};
-  
-  for (let i = 1; i < data.length; i++) {
-    // データ列: [キーワード(0), 正解(1), 回数(2), 種別(3)]
-    const rowKey = data[i][0];
-    const rowType = data[i][3] || 'CATEGORY'; // 古いデータはCATEGORY扱い
+  const idCol = createColumnMap(data[0])['登録ID'];
+  const statusCol = createColumnMap(data[0])['ステータス'];
 
-    if (rowKey === text && rowType === type) {
-      const cat = data[i][1];
-      counts[cat] = (counts[cat] || 0) + Number(data[i][2] || 1);
+  ids.forEach(id => {
+    for(let i=1; i<data.length; i++) {
+      if(String(data[i][idCol]) === String(id)) {
+        sheet.getRange(i+1, statusCol + 1).setValue(newStatus);
+      }
     }
-  }
-
-  let max = 0;
-  let bestCategory = '';
-  for (const [cat, count] of Object.entries(counts)) {
-    if (count > max) { max = count; bestCategory = cat; }
-  }
-  return bestCategory; 
+  });
+  return { success: true };
 }
 
-// 互換性のために残す（既存のコードが呼んでいる場合）
-function predictCategoryByItem(itemName) {
-    return predictCategory(itemName, 'CATEGORY');
+/**
+ * ガイドに基づくCSV出力データ作成 (仕訳形式・フラット化)
+ */
+function getDataForCSV(ids) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  
+  // ① マスタデータのマッピング（辞書作成）
+  const uSheet = ss.getSheetByName(SHEETS.USERS);
+  const uData = uSheet.getDataRange().getValues();
+  const userDeptMap = {};
+  for(let i=1; i<uData.length; i++) userDeptMap[String(uData[i][0])] = String(uData[i][6]); // G列: 部門コード
+
+  const aSheet = ss.getSheetByName(SHEETS.ACCOUNTS);
+  const aData = aSheet.getDataRange().getValues();
+  const accountCodeMap = {};
+  for(let i=1; i<aData.length; i++) accountCodeMap[String(aData[i][0])] = String(aData[i][1]); // B列: 科目コード
+
+  // ② 親子データの取得
+  const rSheet = ss.getSheetByName(SHEETS.RECEIPTS);
+  const rData = rSheet.getDataRange().getValues();
+  const rColMap = createColumnMap(rData[0]);
+  const dSheet = ss.getSheetByName(SHEETS.DETAILS);
+  const dData = dSheet.getDataRange().getValues();
+  const dColMap = createColumnMap(dData[0]);
+
+  const detailMap = {};
+  for(let i=1; i<dData.length; i++){
+    const pid = String(dData[i][dColMap['親登録ID']]);
+    if(!detailMap[pid]) detailMap[pid] = [];
+    detailMap[pid].push({ category: dData[i][dColMap['勘定科目']], item: dData[i][dColMap['項目名']], amount: dData[i][dColMap['金額(税込)']], memo: dData[i][dColMap['メモ']] });
+  }
+
+  const csvRows = [["日付", "部門コード", "借方科目コード", "借方科目名", "貸方科目コード", "貸方科目名", "支払先", "摘要", "金額(税込)"]];
+  const targets = rData.filter(row => ids.includes(String(row[rColMap['登録ID']])));
+
+  targets.forEach(row => {
+    const pid = String(row[rColMap['登録ID']]);
+    const useDate = row[rColMap['利用日']];
+    const dateStr = (useDate instanceof Date) ? Utilities.formatDate(useDate, Session.getScriptTimeZone(), "yyyy/MM/dd") : String(useDate);
+    const userName = String(row[rColMap['使用者']]);
+    const storeName = String(row[rColMap['支払先']]);
+    const appType = String(row[rColMap['申請区分']]);
+    
+    // 貸方情報の固定設定
+    let creditCode = (appType === "営業所") ? "1102" : "";
+    let creditName = (appType === "営業所") ? "当座預金もみじ" : "現金";
+
+    const details = detailMap[pid] || [];
+    details.forEach(d => {
+      csvRows.push([
+        dateStr,
+        userDeptMap[userName] || "",
+        accountCodeMap[d.category] || "",
+        d.category,
+        creditCode,
+        creditName,
+        storeName,
+        `${d.item} ${d.memo}`.trim(),
+        d.amount
+      ]);
+    });
+  });
+
+  return csvRows;
 }
 
+// 共通関数
+function approveApplication(id) { return updateStatusBulk([id], STATUS.APPROVED); }
+function rejectApplication(id, comment) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SHEETS.RECEIPTS);
+  const data = sheet.getDataRange().getValues();
+  const rColMap = createColumnMap(data[0]);
+  for(let i=1; i<data.length; i++) if(String(data[i][rColMap['登録ID']]) === id) {
+    sheet.getRange(i+1, rColMap['ステータス']+1).setValue(STATUS.REJECTED);
+    sheet.getRange(i+1, rColMap['メモ']+1).setValue(data[i][rColMap['メモ']] + "\n[差戻し理由] " + comment);
+  }
+}
+function uploadAndAnalyzeAndDraft(data) { return saveApplication(data, [{category:'', itemName:'解析中', total_price:0, memo:''}]); }
 function getMasters() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const accounts = ss.getSheetByName(SHEETS.ACCOUNTS).getDataRange().getValues().slice(1).map(r => r[0]);
-  return { accounts: accounts };
-}
-
-function getApprovalRoute(category, amount, items, hasAllowance) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(SHEETS.RULES);
-  const data = sheet.getDataRange().getValues();
-  
-  const colMap = createColumnMap(data[0]);
-  const idxCat = colMap['対象科目'];
-  const idxAmt = colMap['金額条件'];
-  const idxKw = colMap['キーワード条件'];
-  const idxAllow = colMap['日当条件'];
-  const idxRoute = colMap['必須承認者ルート'];
-
-  const rules = data.slice(1).sort((a, b) => a[1] - b[1]);
-
-  for (const rule of rules) {
-    let match = true;
-    
-    if (idxCat !== undefined && rule[idxCat] && rule[idxCat] !== '*' && rule[idxCat] !== category) match = false;
-    if (idxAmt !== undefined && rule[idxAmt] && amount < rule[idxAmt]) match = false;
-    if (idxKw !== undefined && rule[idxKw]) {
-      const allText = items.map(i => i.name).join(' ');
-      if (!allText.includes(rule[idxKw])) match = false;
-    }
-    if (idxAllow !== undefined) {
-      const ruleAllowance = rule[idxAllow];
-      if (String(ruleAllowance).toUpperCase() === 'TRUE' && !hasAllowance) match = false;
-    }
-
-    if (match) {
-      if(idxRoute !== undefined) return rule[idxRoute].split(',').map(s => s.trim()).filter(s => s);
-    }
-  }
-  return [];
-}
-
-function generateCSV(type) {
-  const lock = LockService.getScriptLock();
-  try {
-    lock.waitLock(30000);
-
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const configSheet = ss.getSheetByName(SHEETS.CSV_CONFIG);
-    const configData = configSheet.getDataRange().getValues();
-    const configColMap = createColumnMap(configData[0]);
-    const idxType = configColMap['出力種別'];
-    const idxOrder = configColMap['列順'];
-    const idxHeader = configColMap['ヘッダー名']; 
-    const idxCharset = configColMap['文字コード']; 
-    
-    if (idxType === undefined || idxOrder === undefined) throw new Error('CSV設定シートの形式が不正です');
-
-    const configs = configData.slice(1)
-      .filter(r => r[idxType] === type)
-      .sort((a, b) => a[idxOrder] - b[idxOrder]);
-
-    if (!configs.length) throw new Error('CSV設定が見つかりません: ' + type);
-
-    let charset = 'Shift_JIS';
-    if (idxCharset !== undefined) {
-        const settingCharset = String(configs[0][idxCharset]).trim();
-        if (settingCharset.toUpperCase() === 'UTF-8') charset = 'UTF-8';
-    }
-
-    const rSheet = ss.getSheetByName(SHEETS.RECEIPTS);
-    const rData = rSheet.getDataRange().getValues();
-    const rColMap = createColumnMap(rData[0]);
-    const rMap = new Map();
-    const idxRId = rColMap['登録ID'];
-    const idxStatus = rColMap['ステータス'];
-
-    rData.slice(1).forEach(row => {
-      const id = String(row[idxRId]).trim();
-      if (String(row[idxStatus]).trim() === STATUS.APPROVED) {
-        rMap.set(id, row);
-      }
-    });
-
-    const dSheet = ss.getSheetByName(SHEETS.DETAILS);
-    const dData = dSheet.getDataRange().getValues();
-    const dColMap = createColumnMap(dData[0]);
-    const idxDParent = dColMap['親登録ID'];
-    
-    let csvHeaderRow = configs.map(c => c[idxHeader] || c[2]);
-    let csv = csvHeaderRow.join(',') + '\r\n';
-
-    dData.slice(1).forEach(dRow => {
-      const parentId = String(dRow[idxDParent]).trim();
-      const rRow = rMap.get(parentId);
-      if (!rRow) return;
-
-      const line = configs.map(config => {
-        const source = config[configColMap['参照元']];
-        const colName = String(config[configColMap['カラム名']]).trim();
-        const format = config[configColMap['フォーマット指定']];
-        
-        let value = '';
-        if (source === '固定値') {
-          value = colName;
-        } else {
-          let targetRow = (source === '領収書') ? rRow : dRow;
-          let targetColMap = (source === '領収書') ? rColMap : dColMap;
-          
-          let idx = targetColMap ? targetColMap[colName] : undefined;
-          if (idx !== undefined) value = targetRow[idx];
-        }
-
-        if (format === 'YYYYMMDD' && value instanceof Date) {
-          value = Utilities.formatDate(value, Session.getScriptTimeZone(), 'yyyyMMdd');
-        }
-        return `"${String(value).replace(/"/g, '""')}"`;
-      }).join(',');
-
-      csv += line + '\r\n';
-    });
-
-    const blob = Utilities.newBlob('', 'text/csv', type + '.csv').setDataFromString(csv, charset);
-    return {
-      base64: Utilities.base64Encode(blob.getBytes()),
-      filename: `${type}_${Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd_HHmm')}.csv`
-    };
-  } catch (e) {
-    throw new Error('CSV出力エラー: ' + e.message);
-  } finally {
-    lock.releaseLock();
-  }
+  const users = ss.getSheetByName(SHEETS.USERS).getDataRange().getValues().slice(1).map(r => ({name:r[0], position:r[5]}));
+  return { accounts, users };
 }
