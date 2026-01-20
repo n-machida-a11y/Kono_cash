@@ -9,128 +9,49 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <style>
     body { background-color: #f8f9fa; font-family: "Helvetica Neue", Arial, sans-serif; }
-    
-    /* 共通UIスタイル */
     .navbar { background-color: #0d6efd; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
     .navbar-brand { font-weight: bold; color: white !important; display: flex; align-items: center; gap: 10px; }
     .nav-link { color: rgba(255,255,255,0.85) !important; font-weight: 500; }
     .nav-link.active { color: white !important; font-weight: bold; background-color: rgba(255,255,255,0.2); border-radius: 4px; }
-    
-    .card { margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border: none; }
-    .status-badge { font-size: 0.9em; }
-    
-    /* ドラッグ＆ドロップエリア */
-    .drag-area {
-      border: 2px dashed #ccc; padding: 30px 20px; text-align: center; cursor: pointer; background: #fff;
-      transition: all 0.3s; border-radius: 12px; height: 100%;
-      display: flex; flex-direction: column; justify-content: center; align-items: center;
-    }
-    .drag-area:hover { background-color: #f1f1f1; border-color: #0d6efd; }
-    .drag-area:active { background-color: #e7f1ff; border-color: #0d6efd; transform: scale(0.98); }
-    
-    /* モーダル (Fullscreen) */
+    .card { margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border: none; transition: transform 0.2s; }
+    .selection-card { cursor: pointer; border: 1px solid #dee2e6; height: 100%; }
+    .selection-card:hover { transform: translateY(-3px); border-color: #0d6efd; box-shadow: 0 6px 12px rgba(0,0,0,0.1); }
     .modal-fullscreen .modal-body { overflow-y: hidden; position: relative; }
-    .modal-title-custom { font-size: 1.25rem; font-weight: bold; color: #333; }
-    
-    /* プレビューエリア */
+    .modal-title-custom { font-size: 1.15rem; font-weight: bold; color: #333; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .preview-container { height: 100vh; background: #333; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; }
     .preview-img { max-width: 100%; max-height: 100%; object-fit: contain; }
-    
-    /* 明細カードスタイル */
-    .detail-card {
-      background-color: #fff;
-      border: 1px solid #dee2e6;
-      border-radius: 6px;
-      padding: 15px;
-      margin-top: 10px;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-      position: relative;
-    }
-    .btn-add-detail {
-      border: 1px dashed #198754; color: #198754; background: #f8fff9;
-      width: 100%; padding: 8px; border-radius: 5px; margin-top: 10px;
-      transition: all 0.2s;
-    }
-    .btn-add-detail:hover { background: #e0f8e9; }
-    .detail-header-text { font-weight: bold; color: #333; font-size: 0.9rem; }
-    .badge-required { background-color: #dc3545; color: white; font-size: 0.65rem; padding: 2px 5px; border-radius: 3px; margin-left: 5px; vertical-align: middle; }
-    
-    .form-label { font-weight: bold; color: #555; font-size: 0.8rem; margin-bottom: 0.2rem; }
+    .detail-card { background-color: #fff; border: 1px solid #dee2e6; border-radius: 6px; padding: 15px; margin-top: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); position: relative; }
     .amount-input-style { font-weight: bold; color: #0d6efd; font-size: 1.1rem !important; }
-
-    /* ローディング */
-    #loadingOverlay {
-      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(255,255,255,0.85); z-index: 10060; display: none;
-      justify-content: center; align-items: center; flex-direction: column;
-    }
+    #loadingOverlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.85); z-index: 10060; display: none; justify-content: center; align-items: center; flex-direction: column; }
     
-    /* グルーピング表示用 */
-    .group-header { background-color: #e9ecef; padding: 10px 15px; font-weight: bold; border-radius: 4px; margin-top: 15px; display: flex; justify-content: space-between; align-items: center; }
+    .btn-edit-unify { font-size: 0.75rem; padding: 2px 8px; white-space: nowrap; }
 
-    /* ========== モバイル対応レスポンシブ設定 ========== */
-    /* PC表示 (lg以上) */
-    @media (min-width: 992px) {
-      .mobile-tab-nav { display: none !important; }
-      .pane-preview, .pane-form { display: flex !important; }
-    }
+    /* ========== モード制御用クラス ========== */
+    .row.manual-mode .pane-preview { display: none !important; }
+    .row.manual-mode .pane-form { width: 100% !important; flex: 0 0 100% !important; max-width: 100% !important; }
 
-    /* スマホ表示 (lg未満) */
-    @media (max-width: 991.98px) {
-      /* 2カラムを1カラムにして切り替える */
-      .pane-preview, .pane-form {
-        width: 100% !important;
-        height: calc(100vh - 50px) !important; /* タブの高さ分引く */
-        display: none; /* JSで制御 */
-      }
-      .pane-preview.active-pane, .pane-form.active-pane {
-        display: flex !important;
-      }
-      .pane-form {
-        background-color: #f5f7fa;
-        flex-direction: column;
-      }
-      /* プレビューエリアの高さ調整 */
-      .preview-container { height: 100%; }
-
-      /* モバイル用固定タブ */
-      .mobile-tab-nav {
-        position: absolute;
-        bottom: 0; left: 0; width: 100%; height: 50px;
-        background: white; border-top: 1px solid #ddd;
-        display: flex; z-index: 1050;
-      }
-      .mobile-tab-btn {
-        flex: 1; border: none; background: transparent;
-        font-weight: bold; color: #6c757d; font-size: 0.9rem;
-        display: flex; align-items: center; justify-content: center; gap: 8px;
-        transition: all 0.2s;
-      }
-      .mobile-tab-btn.active {
-        color: #0d6efd; background-color: #e7f1ff; border-top: 3px solid #0d6efd;
-      }
-      /* モーダル内のスクロールエリア調整 */
-      .scroll-area-mobile {
-        padding-bottom: 60px !important; /* タブに隠れないように */
-      }
+    @media (min-width: 992px) { .mobile-tab-nav { display: none !important; } .pane-preview, .pane-form { display: flex !important; } }
+    @media (max-width: 991.98px) { 
+      .pane-preview, .pane-form { width: 100% !important; height: calc(100vh - 50px) !important; display: none; } 
+      .pane-preview.active-pane, .pane-form.active-pane { display: flex !important; } 
+      .row.manual-mode .pane-form { display: flex !important; height: 100vh !important; } 
+      .mobile-tab-nav { position: absolute; bottom: 0; left: 0; width: 100%; height: 50px; background: white; border-top: 1px solid #ddd; display: flex; z-index: 1050; } 
+      .mobile-tab-btn { flex: 1; border: none; background: transparent; font-weight: bold; color: #6c757d; font-size: 0.9rem; display: flex; align-items: center; justify-content: center; gap: 8px; } 
+      .mobile-tab-btn.active { color: #0d6efd; background-color: #e7f1ff; border-top: 3px solid #0d6efd; } 
     }
   </style>
 </head>
 <body>
 
-<!-- ローディング -->
 <div id="loadingOverlay">
   <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;"></div>
   <div class="mt-3 fs-5 fw-bold text-secondary" id="loadingText">処理中...</div>
 </div>
 
-<!-- ナビゲーション -->
 <nav class="navbar navbar-expand-lg navbar-dark bg-primary mb-4 sticky-top">
   <div class="container-xl">
     <a class="navbar-brand" href="#"><i class="fas fa-coins me-2"></i>現金経費精算アプリ</a>
-    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-      <span class="navbar-toggler-icon"></span>
-    </button>
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav"><span class="navbar-toggler-icon"></span></button>
     <div class="collapse navbar-collapse" id="navbarNav">
       <ul class="navbar-nav me-auto">
         <li class="nav-item"><a class="nav-link active" id="nav-apply" href="#" onclick="showView('apply'); resetApplyForm();">新規登録</a></li>
@@ -144,869 +65,384 @@
 </nav>
 
 <div class="container-xl pb-5">
-  
-  <div id="unregisteredView" style="display:none;"></div>
-
-  <!-- ダッシュボード -->
+  <!-- View: Dashboard -->
   <div id="dashboardView" style="display:none;">
     <div class="d-flex justify-content-between align-items-center mb-4">
       <h3>ダッシュボード</h3>
       <button class="btn btn-outline-secondary btn-sm" onclick="loadDashboard()"><i class="fas fa-sync-alt"></i> 更新</button>
     </div>
-
-    <ul class="nav nav-tabs mb-3" id="dashboardTabs" role="tablist">
-      <li class="nav-item" role="presentation">
-        <button class="nav-link active" id="my-tab" data-bs-toggle="tab" data-bs-target="#my-tab-pane" type="button" role="tab">マイ申請履歴</button>
-      </li>
-      <li class="nav-item" role="presentation" id="all-tab-li" style="display:none;">
-        <button class="nav-link" id="all-tab" data-bs-toggle="tab" data-bs-target="#all-tab-pane" type="button" role="tab">全申請履歴 (経理専用)</button>
-      </li>
+    <ul class="nav nav-tabs mb-3" role="tablist">
+      <li class="nav-item"><button class="nav-link active" id="my-tab" data-bs-toggle="tab" data-bs-target="#my-tab-pane" type="button">マイ申請履歴</button></li>
     </ul>
-
-    <div class="tab-content" id="dashboardTabContent">
-      <div class="tab-pane fade show active" id="my-tab-pane" role="tabpanel">
+    <div class="tab-content">
+      <div class="tab-pane fade show active" id="my-tab-pane">
         <div class="card p-3">
           <div class="d-flex justify-content-between align-items-center mb-2">
-             <div class="alert alert-light border small mb-0 py-2">
-                <i class="fas fa-info-circle me-1"></i> [未申請]を選択してまとめて申請できます。
-             </div>
-             <button class="btn btn-success btn-sm" id="btnBulkSubmit" onclick="submitBulk()" disabled>
-                <i class="fas fa-paper-plane me-2"></i>選択した項目を一括申請
-             </button>
+             <div class="alert alert-light border small mb-0 py-2"><i class="fas fa-info-circle me-1"></i> [未申請]を選択してまとめて申請できます。</div>
+             <button class="btn btn-success btn-sm" id="btnBulkSubmit" onclick="submitBulk()" disabled><i class="fas fa-paper-plane me-2"></i>一括申請</button>
           </div>
           <table class="table table-hover align-middle">
-            <thead>
-                <tr>
-                    <th width="40"><input type="checkbox" id="checkAll" onclick="toggleAllChecks(this)"></th>
-                    <th>利用日</th><th>支払先</th><th>合計金額</th><th>ステータス</th><th>承認者</th><th>操作</th>
-                </tr>
-            </thead>
+            <thead><tr><th width="100">修正・確認</th><th width="40"><input type="checkbox" onclick="toggleAll(this, '.history-check')"></th><th>利用日</th><th>支払先</th><th>金額</th><th>状態</th><th>承認者</th></tr></thead>
             <tbody id="myAppList"></tbody>
           </table>
         </div>
       </div>
-      <div class="tab-pane fade" id="all-tab-pane" role="tabpanel">
-        <div class="card p-3">
-            <div class="d-flex justify-content-between align-items-center mb-3">
-               <div class="alert alert-info py-2 small mb-0"><i class="fas fa-info-circle me-2"></i>登録日ごとにグルーピング表示</div>
-               <div class="input-group" style="width: 300px;">
-                 <span class="input-group-text"><i class="fas fa-search"></i></span>
-                 <input type="text" class="form-control" id="filterInput" placeholder="申請者名で絞り込み..." onkeyup="filterGroupedApps('allAppListContainer')">
-               </div>
-            </div>
-            <div id="allAppListContainer"></div>
-        </div>
-      </div>
     </div>
   </div>
 
-  <!-- 新規登録画面 (アップロード改善) -->
+  <!-- View: Apply -->
   <div id="applyView" style="display:none;">
-    <h3 class="mb-4" id="applyViewTitle">経費データ登録</h3>
-    <div class="card p-4 p-md-5 mx-auto" style="max-width: 800px;" id="uploadArea">
-      
-      <!-- 隠しファイル入力 -->
-      <!-- カメラ起動用 (captureあり) -->
-      <input type="file" id="fileInputCamera" hidden accept="image/*" capture="environment" onchange="handleFiles(this.files)">
-      <!-- アルバム選択用 (captureなし, multipleあり) -->
-      <input type="file" id="fileInputSelect" hidden accept="image/*" multiple onchange="handleFiles(this.files)">
-
-      <div class="row g-3">
-        <!-- カメラボタン -->
-        <div class="col-md-6">
-          <div class="drag-area" onclick="document.getElementById('fileInputCamera').click()">
-            <div class="drag-icon-circle bg-primary text-white"><i class="fas fa-camera fa-2x"></i></div>
-            <h5 class="fw-bold">カメラで撮影</h5>
-            <p class="text-muted small mb-0">1枚ずつ撮影して登録<br>(連続撮影も可能)</p>
+    <h3 class="mb-4">経費データ登録</h3>
+    <div class="container" style="max-width: 900px;">
+      <p class="mb-4 text-muted">登録方法を選択</p>
+      <input type="file" id="fileInputUnified" hidden accept="image/*" multiple onchange="handleFiles(this.files)">
+      <div class="row g-4 justify-content-center">
+        <div class="col-md-5">
+          <div class="card selection-card h-100 p-4 text-center" onclick="document.getElementById('fileInputUnified').click()">
+            <div class="card-body d-flex flex-column align-items-center">
+              <div class="mb-3 text-primary"><i class="fas fa-camera fa-4x"></i></div>
+              <h4 class="fw-bold mb-2">領収書を読み込む</h4>
+              <p class="text-muted mb-0 small">AIが内容を自動入力します</p>
+            </div>
           </div>
         </div>
-
-        <!-- アルバムボタン -->
-        <div class="col-md-6">
-          <div class="drag-area" onclick="document.getElementById('fileInputSelect').click()">
-            <div class="drag-icon-circle bg-success text-white"><i class="fas fa-images fa-2x"></i></div>
-            <h5 class="fw-bold">アルバムから選択</h5>
-            <p class="text-muted small mb-0">複数枚まとめて選択<br>1枚の画像に複数領収書もOK</p>
+        <div class="col-md-5">
+          <div class="card selection-card h-100 p-4 text-center" onclick="startManualEntry()">
+            <div class="card-body d-flex flex-column align-items-center">
+              <div class="mb-3 text-success"><i class="fas fa-keyboard fa-4x"></i></div>
+              <h4 class="fw-bold mb-2">手入力で作成</h4>
+              <p class="text-muted mb-0 small">領収書がない経費など</p>
+            </div>
           </div>
         </div>
-      </div>
-
-      <div class="mt-4 text-center">
-         <button class="btn btn-outline-secondary px-4" onclick="startManualEntry()">
-           <i class="fas fa-keyboard me-2"></i>手入力で作成
-         </button>
       </div>
     </div>
   </div>
 
-  <!-- 承認画面 -->
+  <!-- View: Admin -->
+  <div id="adminView" style="display:none;">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h4>④ 管理者画面</h4>
+        <div class="d-flex gap-2">
+            <button class="btn btn-outline-success fw-bold" onclick="processAdminAction('checkBulk')">選択を確認済みにする</button>
+            <button class="btn btn-primary fw-bold" onclick="downloadCSV('kanjo')">CSV出力して完了</button>
+        </div>
+    </div>
+    
+    <div class="card mb-3 border-0 shadow-sm">
+        <div class="card-body p-3">
+            <div class="row g-2 align-items-center">
+                <div class="col-md-3">
+                    <label class="form-label small fw-bold">対象月</label>
+                    <input type="month" id="adminFilterMonth" class="form-control form-control-sm" onchange="renderAdminTable()">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-bold">絞り込み</label>
+                    <input type="text" id="adminFilterSearch" class="form-control form-control-sm" placeholder="店名・名前..." oninput="renderAdminTable()">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-bold">表示ステータス</label>
+                    <select id="adminFilterStatus" class="form-select form-select-sm" onchange="renderAdminTable()">
+                        <option value="all">すべて</option>
+                        <option value="承認済" selected>経理未チェック (承認済)</option>
+                        <option value="確認済み">経理チェック済 (CSV待)</option>
+                    </select>
+                </div>
+                <div class="col-md-3 text-end pt-4">
+                    <span class="badge bg-light text-dark border shadow-sm"><span id="adminDisplayCount">0</span>件表示中</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card p-0 shadow-sm overflow-hidden">
+        <div class="table-responsive" style="max-height: 60vh;">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="sticky-top bg-light">
+                    <tr>
+                        <th width="100">修正・確認</th>
+                        <th width="40"><input type="checkbox" onclick="toggleAll(this, '.admin-check')"></th>
+                        <th style="cursor:pointer" onclick="sortAdminData('useDate')">利用日 <i class="fas fa-sort small opacity-50"></i></th>
+                        <th>申請者</th>
+                        <th>支払先</th>
+                        <th>科目</th>
+                        <th class="text-end" style="cursor:pointer" onclick="sortAdminData('amount')">金額 <i class="fas fa-sort small opacity-50"></i></th>
+                        <th class="text-center">状態</th>
+                    </tr>
+                </thead>
+                <tbody id="adminBody"></tbody>
+            </table>
+        </div>
+    </div>
+  </div>
+  
+  <!-- View: Approval -->
   <div id="approvalListView" style="display:none;">
     <h3 class="mb-4">承認待ち案件</h3>
-    <div class="card p-3">
-       <div class="d-flex justify-content-end mb-2">
-           <input type="text" class="form-control form-control-sm" id="filterApproval" placeholder="申請者名で絞り込み..." style="width: 250px;" onkeyup="filterGroupedApps('approvalListContainer', 'filterApproval')">
-       </div>
-       <div id="approvalListContainer"></div>
-    </div>
-  </div>
-
-  <!-- 管理画面 -->
-  <div id="adminView" style="display:none;">
-    <h3 class="mb-4">経理管理メニュー</h3>
-    <div class="row">
-      <div class="col-md-6">
-        <div class="card p-4 h-100">
-          <h5><i class="fas fa-file-csv me-2"></i>データ出力</h5>
-          <div class="d-grid gap-2">
-            <button class="btn btn-outline-primary" onclick="downloadCSV('勘定奉行')">勘定奉行用CSV</button>
-            <button class="btn btn-outline-success" onclick="downloadCSV('銀行振込')">銀行振込用CSV</button>
-          </div>
-        </div>
-      </div>
-      <div class="col-md-6">
-        <div class="card p-4 h-100">
-          <h5><i class="fas fa-cog me-2"></i>マスタ管理</h5>
-          <a href="#" id="spreadsheetLink" target="_blank" class="btn btn-link">スプレッドシートを開く</a>
-        </div>
+    <div class="card p-3 overflow-hidden shadow-sm">
+      <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+          <thead>
+            <tr>
+              <th width="100">修正・確認</th>
+              <th>申請者</th>
+              <th>利用日</th>
+              <th>支払先</th>
+              <th class="text-end">金額</th>
+              <th width="100">操作</th>
+            </tr>
+          </thead>
+          <tbody id="approvalListContainer"></tbody>
+        </table>
       </div>
     </div>
   </div>
 </div>
 
-<!-- ========================================== -->
-<!-- 編集用フルスクリーンモーダル -->
-<!-- ========================================== -->
+<!-- Modal: Edit -->
 <div class="modal fade" id="editModal" tabindex="-1" data-bs-backdrop="static">
   <div class="modal-dialog modal-fullscreen">
     <div class="modal-content">
       <div class="modal-body p-0 h-100">
         <input type="hidden" id="editId">
-        <div class="row g-0 h-100 desktop-split-view">
-          
-          <!-- 左側: プレビュー (Base64画像) -->
+        <div class="row g-0 h-100" id="modalRow">
           <div class="col-lg-6 bg-dark preview-container pane-preview" id="panePreview">
-            <img id="previewImg" class="preview-img" src="" alt="領収書プレビュー">
-            <div id="noPreview" class="text-white text-center" style="display:none;">
-              <i class="fas fa-eye-slash fa-3x mb-3"></i><br>プレビューできません<br>(画像なし)
+            <div id="imagePreviewArea" class="w-100 h-100 d-flex justify-content-center align-items-center">
+                <img id="previewImg" class="preview-img" src="" alt="プレビュー">
+                <div id="noPreview" class="text-white text-center" style="display:none;"><i class="fas fa-eye-slash fa-3x mb-3"></i><br>画像なし</div>
             </div>
-            
-            <div class="position-absolute bottom-0 start-0 p-3 w-100 bg-gradient-dark text-white" style="background: rgba(0,0,0,0.5);">
-               <div class="form-check">
-                  <input class="form-check-input" type="checkbox" id="checkInvoice">
-                  <label class="form-check-label" for="checkInvoice">インボイス登録番号あり</label>
-               </div>
-               <div class="mt-2">
-                 <label class="btn btn-sm btn-outline-light">
-                    <i class="fas fa-sync-alt me-1"></i>画像差替
-                    <input type="file" id="editFileInput" hidden accept="image/*">
-                 </label>
-               </div>
+            <div class="position-absolute bottom-0 start-0 p-3 w-100 text-white" style="background: rgba(0,0,0,0.5);">
+               <div class="form-check"><input class="form-check-input" type="checkbox" id="checkInvoice"><label class="form-check-label" for="checkInvoice">インボイス登録番号あり</label></div>
+               <div class="mt-2"><label class="btn btn-sm btn-outline-light">画像差替<input type="file" id="editFileInput" hidden accept="image/*"></label></div>
             </div>
           </div>
-          
-          <!-- 右側: 入力フォーム -->
-          <div class="col-lg-6 h-100 pane-form active-pane" id="paneForm">
-            
-            <!-- 固定ヘッダー -->
-            <div class="bg-white border-bottom px-4 py-3 d-flex justify-content-between align-items-center shadow-sm" style="flex-shrink: 0;">
-              <h5 class="modal-title-custom m-0" id="modalTitle"><i class="fas fa-edit text-primary me-2"></i>登録内容の修正</h5>
-              <div id="modalActions">
-                 <!-- JSでボタンを動的生成 -->
-              </div>
+          <div class="col-lg-6 h-100 pane-form active-pane d-flex flex-column">
+            <div class="bg-white border-bottom px-4 py-3 d-flex justify-content-between align-items-center shadow-sm">
+              <h5 class="modal-title-custom m-0" id="modalTitle">登録内容の修正</h5>
+              <div id="modalActions"></div>
             </div>
-
-            <!-- スクロールエリア (下部のタブに被らないよう余白調整) -->
-            <div class="p-4 scroll-area-mobile" style="overflow-y: auto; flex-grow: 1;">
-              
-              <!-- ヘッダー情報 -->
+            <div class="p-4" style="overflow-y: auto; flex-grow: 1;">
               <div class="card border-0 shadow-sm mb-3">
-                <div class="card-body">
-                  <div class="row g-3">
-                    <div class="col-12">
-                       <label class="form-label">区分 <span class="badge-required">必須</span></label>
-                       <div class="btn-group w-100" role="group">
-                         <input type="radio" class="btn-check" name="appType" id="typeBusiness" value="営業所" autocomplete="off">
-                         <label class="btn btn-outline-primary" for="typeBusiness"><i class="fas fa-building me-2"></i>営業所</label>
-                         <input type="radio" class="btn-check" name="appType" id="typePersonal" value="個人" autocomplete="off">
-                         <label class="btn btn-outline-primary" for="typePersonal"><i class="fas fa-user me-2"></i>個人</label>
-                       </div>
-                    </div>
-                    
-                    <div class="col-md-6">
-                      <label class="form-label">申請者名 <span class="badge-required">必須</span></label>
-                      <input type="text" class="form-control" id="formUserName" placeholder="氏名">
-                    </div>
-                    <div class="col-md-6">
-                      <label class="form-label">利用日 <span class="badge-required">必須</span></label>
-                      <input type="date" class="form-control" id="formDate">
-                    </div>
-
-                    <div class="col-12">
-                      <label class="form-label">支払先</label>
-                      <input type="text" class="form-control" id="formStore" placeholder="店舗名など">
-                    </div>
-                    
-                    <div class="col-12">
-                       <label class="form-label text-primary">領収書合計金額 (税込) <span class="badge-required">必須</span></label>
-                       <input type="number" class="form-control text-end amount-input-style" id="formTotalAmount" placeholder="0">
-                       <div class="text-end text-danger small mt-1" id="amountAlert" style="display:none;">
-                         <i class="fas fa-exclamation-circle"></i> 明細計と一致しません
-                       </div>
-                    </div>
-
-                    <div class="col-12">
-                      <label class="form-label text-muted small">メモ (AI読取内容)</label>
-                      <textarea class="form-control form-control-sm" id="formMemo" rows="2"></textarea>
-                    </div>
-                  </div>
+                <div class="card-body row g-3">
+                    <div class="col-md-6"><label class="form-label">申請者</label><input type="text" class="form-control" id="formUserName" list="userList" onchange="checkAllowanceAmount()"></div>
+                    <div class="col-md-6"><label class="form-label">利用日</label><input type="date" class="form-control" id="formDate"></div>
+                    <div class="col-12"><div class="form-check form-switch bg-light p-2 rounded border"><input class="form-check-input ms-0 me-2" type="checkbox" id="checkIsAllowance" onchange="checkAllowanceAmount()"><label class="form-check-label fw-bold" for="checkIsAllowance">日当を申請する</label></div></div>
+                    <div class="col-12" id="storeNameRow"><label class="form-label">支払先</label><input type="text" class="form-control" id="formStore"></div>
+                    <div class="col-12"><label class="form-label text-primary">合計金額 (税込)</label><input type="number" class="form-control text-end amount-input-style" id="formTotalAmount"></div>
                 </div>
               </div>
-
-              <!-- 明細エリア -->
-              <h5 class="detail-header-text mb-2 mt-4"><i class="fas fa-list me-2"></i>明細入力</h5>
-              <div id="detailItemsContainer">
-                <!-- 明細カードがここに追加される -->
-              </div>
-              
-              <div class="mt-3">
-                <button type="button" class="btn-add-detail" onclick="addDetailItem()"><i class="fas fa-plus me-1"></i>明細を追加</button>
-              </div>
-              
-              <div class="mt-5 text-end">
-                 <button type="button" class="btn btn-link text-danger btn-sm" id="btnDeleteApp" onclick="deleteCurrentApp()"><i class="fas fa-trash-alt me-1"></i>このデータを削除</button>
-              </div>
-
+              <div id="detailItemsContainer"></div>
+              <button class="btn btn-sm btn-outline-success w-100 mt-2" onclick="addDetailItem()">+ 明細追加</button>
             </div>
           </div>
         </div>
-
-        <!-- モバイル用タブ（PCでは非表示） -->
-        <div class="mobile-tab-nav">
-          <button class="mobile-tab-btn" id="tabBtnPreview" onclick="switchMobileTab('preview')">
-            <i class="fas fa-image"></i> 領収書画像
-          </button>
-          <button class="mobile-tab-btn active" id="tabBtnForm" onclick="switchMobileTab('form')">
-            <i class="fas fa-edit"></i> 入力フォーム
-          </button>
+        <div class="mobile-tab-nav" id="mobileTabNav">
+          <button class="mobile-tab-btn" id="tabBtnPreview" onclick="switchMobileTab('preview')"><i class="fas fa-image"></i> 画像</button>
+          <button class="mobile-tab-btn active" id="tabBtnForm" onclick="switchMobileTab('form')"><i class="fas fa-edit"></i> フォーム</button>
         </div>
-
       </div>
     </div>
   </div>
 </div>
 
-<!-- 隠しDatalist -->
 <datalist id="categoryList"></datalist>
+<datalist id="userList"></datalist>
+<datalist id="itemNameList"><option value="日当"><option value="宿泊"><option value="燃料代"><option value="公共交通機関"></datalist>
 
 <script>
-  let currentUser = null;
-  let accountMasters = [];
-  
-  // 複数登録・編集用
-  let pendingDrafts = []; 
-  let currentDraftIndex = -1;
-  let editModal = null;
-  
-  // 明細データ保持用
-  let detailData = [];
+  let currentUser = null, historyData = [], detailData = [], editModal = null, pendingDrafts = [], currentDraftIndex = -1, adminSortKey = 'useDate', adminSortOrder = 1, userMasters = [];
 
   window.onload = function() {
     editModal = new bootstrap.Modal(document.getElementById('editModal'));
+    document.getElementById('adminFilterMonth').value = new Date().toISOString().slice(0,7);
     loadUser();
   };
 
-  // --- モバイルタブ切り替え処理 ---
   function switchMobileTab(target) {
-    const panePreview = document.getElementById('panePreview');
-    const paneForm = document.getElementById('paneForm');
-    const btnPreview = document.getElementById('tabBtnPreview');
-    const btnForm = document.getElementById('tabBtnForm');
-
-    if (target === 'preview') {
-      panePreview.classList.add('active-pane');
-      paneForm.classList.remove('active-pane');
-      btnPreview.classList.add('active');
-      btnForm.classList.remove('active');
-    } else {
-      panePreview.classList.remove('active-pane');
-      paneForm.classList.add('active-pane');
-      btnPreview.classList.remove('active');
-      btnForm.classList.add('active');
-    }
+    const p = document.getElementById('panePreview'), f = document.querySelector('.pane-form');
+    if (target === 'preview') { p.classList.add('active-pane'); f.classList.remove('active-pane'); }
+    else { p.classList.remove('active-pane'); f.classList.add('active-pane'); }
   }
 
-  function loadUser(manualEmail = null) {
+  function loadUser() {
     showLoading(true);
     google.script.run.withSuccessHandler(user => {
-        setupUser(user);
-    }).withFailureHandler(err => {
-        console.warn("User load failed, falling back to guest.", err);
-        // エラー時もゲストとして続行
-        setupUser({ name: '', email: 'guest@example.com', role: 'ゲスト', canFix: true });
-    }).getCurrentUser(manualEmail);
-  }
-  
-  function setupUser(user) {
-        currentUser = user;
-        const roleText = user.role === 'ゲスト' ? 'ゲスト利用' : `${user.role}`;
-        document.getElementById('userInfo').textContent = `${user.name || '未設定'} (${roleText})`;
-        
-        if (['課長','社長','経理'].includes(user.role)) document.getElementById('navApproval').style.display = 'block';
-        if (['経理','管理者','社長'].includes(user.role)) document.getElementById('navAdmin').style.display = 'block';
-        
-        const nameInput = document.getElementById('formUserName');
-        if(nameInput) nameInput.value = user.name || '';
-
-        showView('apply');
-        loadMasters();
-        showLoading(false);
+      currentUser = user;
+      document.getElementById('userInfo').textContent = `${user.name} (${user.role})`;
+      if (['経理','管理者','社長'].includes(user.role)) {
+          document.getElementById('navApproval').style.display = 'block';
+          document.getElementById('navAdmin').style.display = 'block';
+      }
+      loadMasters(); loadDashboard(); showView('apply'); showLoading(false);
+    }).getCurrentUser();
   }
 
-  // ログイン画面削除に伴いmanualLoginは不要だが、コード参照用に残すか削除（今回はUIから消えているので実質無効）
-  function manualLogin() { /* 廃止 */ }
-
-  function showView(viewId) {
-    ['dashboardView','applyView','approvalListView','adminView','unregisteredView'].forEach(id => document.getElementById(id).style.display = 'none');
+  function showView(v) {
+    ['dashboardView','applyView','approvalListView','adminView'].forEach(id => document.getElementById(id).style.display = 'none');
     document.querySelectorAll('.nav-link').forEach(el => el.classList.remove('active'));
-    
-    const navMap = {dashboard:'nav-dashboard', apply:'nav-apply', approvalList:'nav-approvalList', admin:'nav-admin'};
-    if(navMap[viewId]) document.getElementById(navMap[viewId]).classList.add('active');
-
-    document.getElementById(viewId + 'View').style.display = 'block';
-    
-    if (viewId === 'dashboard') loadDashboard();
-    if (viewId === 'admin') google.script.run.withSuccessHandler(url => document.getElementById('spreadsheetLink').href = url).getSpreadsheetUrl();
+    if(document.getElementById('nav-'+v)) document.getElementById('nav-'+v).classList.add('active');
+    document.getElementById(v + 'View').style.display = 'block';
+    if(v === 'admin') loadAdminData();
+    if(v === 'dashboard') loadDashboard();
+    if(v === 'approvalList') loadDashboard();
   }
 
   function loadMasters() {
-    google.script.run.withSuccessHandler(data => {
-      accountMasters = data.accounts;
-      const dl = document.getElementById('categoryList');
-      dl.innerHTML = '';
-      accountMasters.forEach(acc => dl.innerHTML += `<option value="${acc}">`);
+    google.script.run.withSuccessHandler(d => {
+      userMasters = d.users;
+      document.getElementById('categoryList').innerHTML = d.accounts.map(a => `<option value="${a}">`).join('');
+      document.getElementById('userList').innerHTML = d.users.map(u => `<option value="${u.name}">`).join('');
     }).getMasters();
   }
 
-  // ==============================================
-  // ファイルアップロード & 連続処理
-  // ==============================================
-  // UIボタンから直接 input.click() するため、イベントリスナー設定はシンプルに
-  // ドラッグ&ドロップエリアはボタンを内包しているが、ドラッグ時は handleFiles が呼ばれるようにしたい場合は調整が必要
-  // 今回はボタンクリックメインの想定だが、ドロップ用に残しておく
-  
-  // 編集画面からの画像差し替え
-  document.getElementById('editFileInput').onchange = (e) => {
-     const file = e.target.files[0];
-     if(!file) return;
-     const reader = new FileReader();
-     reader.onload = (ev) => {
-        // プレビュー更新
-        document.getElementById('previewImg').src = ev.target.result;
-        // 注意: 実際のデータ更新は保存時に行われるが、Base64を保持する必要がある
-        // ここでは簡易的にDOMのdata属性などに持たせるか、グローバル変数で管理
-        document.getElementById('previewImg').dataset.newBase64 = ev.target.result.split(',')[1];
-        document.getElementById('previewImg').dataset.newMime = file.type;
-        document.getElementById('previewImg').dataset.newFileName = file.name;
-     };
-     reader.readAsDataURL(file);
-  };
-
-  function startManualEntry() {
-    pendingDrafts = [];
-    currentDraftIndex = -1;
-    openEditWithData({}, true); 
-  }
-
-  function handleFiles(files) {
-    if (!files || files.length === 0) return;
+  function renderAdminTable() {
+    const tbody = document.getElementById('adminBody');
+    const month = document.getElementById('adminFilterMonth').value;
+    const search = document.getElementById('adminFilterSearch').value.toLowerCase();
+    const statusFilter = document.getElementById('adminFilterStatus').value;
     
-    showLoading(true, `AI解析中... (0/${files.length})`);
-    const filesArray = Array.from(files);
-    pendingDrafts = [];
-    let completedCount = 0;
-    
-    const inputUserName = document.getElementById('formUserName') ? document.getElementById('formUserName').value : '';
-    const targetUserName = (currentUser && currentUser.name) ? currentUser.name : inputUserName;
-
-    let promiseChain = Promise.resolve();
-
-    filesArray.forEach((file, index) => {
-        promiseChain = promiseChain.then(() => {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = function(e) {
-            const base64 = e.target.result.split(',')[1];
-            const payload = {
-                fileName: file.name,
-                mimeType: file.type,
-                base64: base64,
-                userName: targetUserName
-            };
-
-            google.script.run.withSuccessHandler((res) => {
-                completedCount++;
-                document.getElementById('loadingText').textContent = `AI解析中... (${completedCount}/${filesArray.length})`;
-                if (res.success) {
-                    pendingDrafts.push(res.id);
-                }
-                resolve();
-            }).withFailureHandler((err) => {
-                console.error(err);
-                alert("アップロード中にエラーが発生しました: " + err.message);
-                completedCount++;
-                resolve(); // エラーでも次へ
-            }).uploadAndAnalyzeAndDraft(payload);
-            };
-            reader.readAsDataURL(file);
-        });
-        });
+    let filtered = historyData.filter(r => {
+        const matchMonth = !month || (r.useDate && r.useDate.startsWith(month.replace('-','/')));
+        const matchSearch = !search || r.store.toLowerCase().includes(search) || r.user.toLowerCase().includes(search);
+        const matchStatus = statusFilter === 'all' || r.status === statusFilter;
+        return matchMonth && matchSearch && matchStatus;
     });
 
-    promiseChain.then(() => {
-        showLoading(false);
-        // file inputをリセット
-        document.getElementById('fileInputCamera').value = '';
-        document.getElementById('fileInputSelect').value = '';
-
-        if (pendingDrafts.length > 0) {
-            startMultiDraftEdit();
-        } else {
-            // エラー表示済みだが念のため
-            if(completedCount === 0) alert("ファイルの選択がキャンセルされたか、エラーが発生しました。");
-        }
+    filtered.sort((a,b) => {
+        let valA = a[adminSortKey], valB = b[adminSortKey];
+        if(adminSortKey === 'amount') { valA = Number(valA); valB = Number(valB); }
+        return valA < valB ? -adminSortOrder : valA > valB ? adminSortOrder : 0;
     });
+
+    tbody.innerHTML = filtered.map(r => `
+        <tr style="cursor:pointer" onclick="fetchAndOpenDraft('${r.id}', true)">
+            <td><button class="btn btn-sm btn-outline-primary btn-edit-unify py-0"><i class="fas fa-edit me-1"></i>修正・確認</button></td>
+            <td onclick="event.stopPropagation()"><input type="checkbox" class="admin-check" value="${r.id}"></td>
+            <td>${r.useDate}</td><td>${r.user}</td><td><b>${r.store}</b></td><td><small>${r.category}</small></td>
+            <td class="text-end fw-bold">¥${Number(r.amount).toLocaleString()}</td>
+            <td class="text-center"><span class="badge ${r.status==='確認済み'?'bg-info':'bg-warning text-dark'}">${r.status}</span></td>
+        </tr>`).join('') || '<tr><td colspan="8" class="text-center py-4">なし</td></tr>';
+    document.getElementById('adminDisplayCount').textContent = filtered.length;
   }
 
-  function startMultiDraftEdit() {
-      currentDraftIndex = 0;
-      fetchAndOpenDraft(pendingDrafts[0], true);
+  function sortAdminData(k) { if(adminSortKey === k) adminSortOrder *= -1; else { adminSortKey = k; adminSortOrder = 1; } renderAdminTable(); }
+  function loadAdminData() { google.script.run.withSuccessHandler(d => { historyData = d.allApplications; renderAdminTable(); }).getDashboardData(currentUser.email); }
+  function toggleAll(src, sel) { document.querySelectorAll(sel).forEach(c => c.checked = src.checked); }
+
+  function processAdminAction(func) {
+    const ids = Array.from(document.querySelectorAll('.admin-check:checked')).map(c => c.value);
+    if(!ids.length) return alert('項目を選択してください');
+    showLoading(true);
+    google.script.run.withSuccessHandler(() => { showLoading(false); loadAdminData(); })[func](ids);
   }
 
-  function fetchAndOpenDraft(id, isEditMode) {
-      showLoading(true, 'データ取得中...');
-      google.script.run.withSuccessHandler(data => {
-          showLoading(false);
-          openEditWithData(data, isEditMode);
-      }).withFailureHandler(err => {
-          showLoading(false);
-          alert('データ取得エラー: ' + err.message);
-      }).getApplicationDetail(id);
-  }
-
-  // ==============================================
-  // モーダル編集ロジック
-  // ==============================================
-  function openEditWithData(data, isEditMode) {
-      const modalTitle = document.getElementById('modalTitle');
-      const modalActions = document.getElementById('modalActions');
-      const btnDelete = document.getElementById('btnDeleteApp');
-      
-      document.getElementById('editId').value = data.id || '';
-      
-      const isMultiDraft = pendingDrafts.length > 0;
-      
-      if (isMultiDraft) {
-          const remaining = pendingDrafts.length - (currentDraftIndex + 1);
-          if (remaining > 0) {
-              modalTitle.innerHTML = `<i class="fas fa-edit text-primary me-2"></i>領収書編集中 (${currentDraftIndex + 1}/${pendingDrafts.length}枚目)`;
-              modalActions.innerHTML = `
-                  <button type="button" class="btn btn-outline-secondary me-2" onclick="cancelEdit()">中断</button>
-                  <button type="button" class="btn btn-warning px-4 fw-bold shadow-sm" onclick="saveAndNextDraft()">
-                     次へ <span class="badge bg-light text-warning ms-1">${remaining}</span> <i class="fas fa-arrow-right ms-1"></i>
-                  </button>`;
-          } else {
-              modalTitle.innerHTML = `<i class="fas fa-edit text-primary me-2"></i>最後の領収書確認 (${currentDraftIndex + 1}/${pendingDrafts.length}枚目)`;
-              modalActions.innerHTML = `
-                  <button type="button" class="btn btn-outline-secondary me-2" onclick="cancelEdit()">キャンセル</button>
-                  <button type="button" class="btn btn-primary px-4 fw-bold shadow-sm" onclick="saveEdit()">
-                     <i class="fas fa-check me-2"></i>登録完了
-                  </button>`;
-          }
-          btnDelete.style.display = 'inline-block';
-      } else if (data.id) {
-          modalTitle.innerHTML = `<i class="fas fa-edit text-primary me-2"></i>登録内容の修正`;
-          modalActions.innerHTML = `
-              <button type="button" class="btn btn-outline-secondary me-2" data-bs-dismiss="modal">キャンセル</button>
-              <button type="button" class="btn btn-primary px-4 fw-bold shadow-sm" onclick="saveEdit()">
-                 <i class="fas fa-check me-2"></i>修正完了
-              </button>`;
-          btnDelete.style.display = 'inline-block';
-      } else {
-          modalTitle.innerHTML = `<i class="fas fa-keyboard text-success me-2"></i>手入力登録`;
-          modalActions.innerHTML = `
-              <button type="button" class="btn btn-outline-secondary me-2" data-bs-dismiss="modal">キャンセル</button>
-              <button type="button" class="btn btn-primary px-4 fw-bold shadow-sm" onclick="saveEdit()">
-                 <i class="fas fa-check me-2"></i>登録
-              </button>`;
-          btnDelete.style.display = 'none';
-      }
-
-      const img = document.getElementById('previewImg');
-      const noPreview = document.getElementById('noPreview');
-      delete img.dataset.newBase64; 
-      
-      if (data.fileBase64) {
-          img.src = `data:${data.mimeType};base64,${data.fileBase64}`;
-          img.style.display = 'block';
-          noPreview.style.display = 'none';
-      } else {
-          img.style.display = 'none';
-          noPreview.style.display = 'block';
-      }
-
-      document.getElementById('formDate').value = data.useDate || '';
-      document.getElementById('formUserName').value = data.userName || (currentUser ? currentUser.name : '');
-      document.getElementById('formStore').value = data.storeName || '';
-      document.getElementById('formTotalAmount').value = data.totalAmount || '';
-      document.getElementById('checkInvoice').checked = !!data.hasInvoice;
-      document.getElementById('formMemo').value = data.memo || '';
-      
-      const appType = data.appType || '営業所';
-      const radio = document.querySelector(`input[name="appType"][value="${appType}"]`);
-      if(radio) radio.checked = true;
-
-      if (data.items && data.items.length > 0) {
-          detailData = JSON.parse(JSON.stringify(data.items));
-      } else {
-          detailData = [{category: '', itemName: '', total_price: '', client: '', participants: '', isAllowance: ''}];
-      }
-      renderDetailItems();
-      
-      switchMobileTab('form');
-      editModal.show();
-  }
-
-  function cancelEdit() {
-      if(pendingDrafts.length > 0) {
-          if(!confirm("連続登録を中断しますか？")) return;
-          pendingDrafts = [];
-      }
-      editModal.hide();
-      loadDashboard();
-  }
-
-  // 明細描画
-  function renderDetailItems() {
-      const container = document.getElementById('detailItemsContainer');
-      container.innerHTML = '';
-      
-      detailData.forEach((item, index) => {
-          const amount = item.total_price;
-          const taxRate = 0.10;
-          let taxExcluded = '', tax = '';
-          if(amount) {
-              taxExcluded = Math.round(amount / (1 + taxRate));
-              tax = amount - taxExcluded;
-          }
-          
-          let allowanceVal = item.isAllowance;
-          if (allowanceVal === true || allowanceVal === "true") allowanceVal = "日当";
-
-          const html = `
-            <div class="detail-card mb-3" id="detail-card-${index}">
-              <div class="d-flex justify-content-between align-items-center mb-2" style="border-bottom: 1px solid #eee; padding-bottom: 5px;">
-                <span class="detail-header-text"><i class="fas fa-list-ul me-2"></i>明細 ${index + 1}</span>
-                <button type="button" class="btn btn-sm btn-outline-danger p-0 px-2" onclick="removeDetailItem(${index})" style="line-height: 1;"><i class="fas fa-trash-alt me-1"></i>削除</button>
-              </div>
-              
-              <div class="row g-2">
-                <div class="col-6">
-                  <label class="form-label">勘定科目</label>
-                  <input type="text" class="form-control form-control-sm editCat" list="categoryList" value="${item.category||''}" placeholder="科目">
-                </div>
-                <div class="col-6">
-                  <label class="form-label">項目名</label>
-                  <input type="text" class="form-control form-control-sm editItem" value="${item.itemName||''}" placeholder="品代など">
-                </div>
-                
-                <div class="col-12 bg-light p-2 rounded mt-2">
-                   <div class="row g-2 align-items-end">
-                      <div class="col-5">
-                         <label class="form-label text-primary">金額(税込)</label>
-                         <input type="number" class="form-control form-control-sm text-end fw-bold text-primary editPrice" value="${amount||''}" oninput="calcDetailTax(this, ${index})">
-                      </div>
-                      <div class="col-3">
-                         <label class="form-label small text-muted">税抜</label>
-                         <input type="text" class="form-control form-control-sm text-end bg-white editExcluded" value="${taxExcluded}" readonly>
-                      </div>
-                      <div class="col-4">
-                         <label class="form-label small text-muted">消費税(10%)</label>
-                         <input type="text" class="form-control form-control-sm text-end bg-white editTax" value="${tax}" readonly>
-                      </div>
-                   </div>
-                </div>
-
-                <div class="col-6">
-                  <label class="form-label">取引先</label>
-                  <input type="text" class="form-control form-control-sm editClient" value="${item.client||''}">
-                </div>
-                <div class="col-3">
-                  <label class="form-label">人数</label>
-                  <input type="number" class="form-control form-control-sm editParticipants" value="${item.participants||''}">
-                </div>
-                <div class="col-3">
-                   <label class="form-label text-danger small">日当/宿泊</label>
-                   <select class="form-select form-select-sm editAllowance">
-                      <option value="">-</option>
-                      <option value="日当" ${allowanceVal==='日当'?'selected':''}>日当</option>
-                      <option value="宿泊" ${allowanceVal==='宿泊'?'selected':''}>宿泊</option>
-                      <option value="日当・宿泊" ${allowanceVal==='日当・宿泊'?'selected':''}>両方</option>
-                   </select>
-                </div>
-              </div>
-            </div>`;
-          container.innerHTML += html;
-      });
-      calcHeaderTotal();
-  }
-  
-  function addDetailItem() {
-      detailData.push({category: '', itemName: '', total_price: '', client: '', participants: '', isAllowance: ''});
-      renderDetailItems();
-  }
-  
-  function removeDetailItem(index) {
-      if(detailData.length <= 1) return alert('明細は最低1行必要です');
-      detailData.splice(index, 1);
-      renderDetailItems();
-  }
-  
-  function calcDetailTax(input, index) {
-      const val = Number(input.value);
-      detailData[index].total_price = val;
-      renderDetailItems();
-  }
-  
-  function calcHeaderTotal() {
-      let sum = 0;
-      detailData.forEach(d => sum += Number(d.total_price)||0);
-      document.getElementById('formTotalAmount').value = sum;
-      
-      const headerTotal = Number(document.getElementById('formTotalAmount').value);
-      const alertEl = document.getElementById('amountAlert');
-      if (headerTotal !== sum) alertEl.style.display = 'block';
-      else alertEl.style.display = 'none';
-  }
-  
-  document.getElementById('formTotalAmount').addEventListener('input', function() {
-      let sum = 0;
-      detailData.forEach(d => sum += Number(d.total_price)||0);
-      const headerTotal = Number(this.value);
-      const alertEl = document.getElementById('amountAlert');
-      if (headerTotal !== sum) alertEl.style.display = 'block';
-      else alertEl.style.display = 'none';
-  });
-
-  // ==============================================
-  // 保存・次へ
-  // ==============================================
-  function getFormData() {
-      const itemCards = document.querySelectorAll('.detail-card');
-      const items = [];
-      itemCards.forEach(card => {
-          items.push({
-             category: card.querySelector('.editCat').value,
-             itemName: card.querySelector('.editItem').value,
-             total_price: Number(card.querySelector('.editPrice').value),
-             client: card.querySelector('.editClient').value,
-             participants: card.querySelector('.editParticipants').value,
-             isAllowance: card.querySelector('.editAllowance').value
-          });
-      });
-      
-      const appTypeEl = document.querySelector('input[name="appType"]:checked');
-      
-      const img = document.getElementById('previewImg');
-      const fileBase64 = img.dataset.newBase64 || null;
-      const fileName = img.dataset.newFileName || null;
-      const mimeType = img.dataset.newMime || null;
-
-      return {
-          id: document.getElementById('editId').value || null,
-          appType: appTypeEl ? appTypeEl.value : '営業所',
-          useDate: document.getElementById('formDate').value,
-          userName: document.getElementById('formUserName').value,
-          storeName: document.getElementById('formStore').value,
-          totalAmount: Number(document.getElementById('formTotalAmount').value),
-          hasInvoice: document.getElementById('checkInvoice').checked,
-          memo: document.getElementById('formMemo').value,
-          fileBase64: fileBase64,
-          fileName: fileName,
-          mimeType: mimeType,
-          items: items
-      };
-  }
-
-  function validate(formData) {
-      if(!formData.userName) return '申請者名を入力してください';
-      if(!formData.useDate) return '利用日を入力してください';
-      if(!formData.totalAmount) return '合計金額を入力してください';
-      
-      let error = null;
-      formData.items.forEach(item => {
-          if(!item.itemName || !item.total_price) error = 'すべての明細の項目名と金額を入力してください';
-      });
-      return error;
-  }
-
-  function saveAndNextDraft() {
-      const data = getFormData();
-      const err = validate(data);
-      if(err) return alert(err);
-      
-      showLoading(true, '保存して次へ...');
-      google.script.run.withSuccessHandler(() => {
-          currentDraftIndex++;
-          if(currentDraftIndex < pendingDrafts.length) {
-              fetchAndOpenDraft(pendingDrafts[currentDraftIndex], true);
-          } else {
-              finishEditSequence();
-          }
-      }).withFailureHandler(e => {
-          showLoading(false);
-          alert('エラー: ' + e.message);
-      }).updateApplication(data);
-  }
-
-  function saveEdit() {
-      const data = getFormData();
-      const err = validate(data);
-      if(err) return alert(err);
-      
-      showLoading(true, '保存中...');
-      const runner = google.script.run.withSuccessHandler(() => {
-          finishEditSequence();
-      }).withFailureHandler(e => {
-          showLoading(false);
-          alert('エラー: ' + e.message);
-      });
-      
-      if(data.id) runner.updateApplication(data);
-      else runner.saveApplication(data, data.items);
-  }
-
-  function finishEditSequence() {
-      showLoading(false);
-      editModal.hide();
-      pendingDrafts = [];
-      alert('登録が完了しました');
-      loadDashboard();
-  }
-
-  function deleteCurrentApp() {
-      const id = document.getElementById('editId').value;
-      if(!id) return;
-      if(!confirm('本当に削除しますか？')) return;
-      
-      showLoading(true, '削除中...');
-      google.script.run.withSuccessHandler(() => {
-          if(pendingDrafts.length > 0) {
-             currentDraftIndex++;
-             if(currentDraftIndex < pendingDrafts.length) {
-                fetchAndOpenDraft(pendingDrafts[currentDraftIndex], true);
-             } else {
-                finishEditSequence();
-             }
-          } else {
-             showLoading(false);
-             editModal.hide();
-             loadDashboard();
-          }
-      }).deleteApplication(id);
-  }
-  
-  function resetApplyForm() {
-     document.getElementById('uploadArea').style.display = 'block';
-     document.getElementById('fileInputCamera').value = '';
-     document.getElementById('fileInputSelect').value = '';
-  }
-
-  // ==============================================
-  // ダッシュボード・リスト表示
-  // ==============================================
-  function loadDashboard() {
-    if(!currentUser) return;
+  function downloadCSV() {
+    const ids = Array.from(document.querySelectorAll('.admin-check:checked')).map(c => c.value);
+    if(!ids.length) return alert('出力する項目を選択してください');
+    showLoading(true, 'CSV作成中...');
     google.script.run.withSuccessHandler(data => {
-      const myTbody = document.getElementById('myAppList');
-      if(!data.myApplications.length) myTbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">履歴なし</td></tr>';
-      else {
-          myTbody.innerHTML = data.myApplications.map(app => `
-            <tr>
-              <td class="text-center">${app.canSubmit ? `<input type="checkbox" class="form-check-input bulk-check" value="${app.id}" onclick="updateBulkButton()">` : ''}</td>
-              <td>${app.useDate}</td>
-              <td>${app.store}</td>
-              <td>¥${Number(app.amount).toLocaleString()}</td>
-              <td><span class="badge bg-${getStatusColor(app.status)}">${app.status}</span></td>
-              <td>${app.approver}</td>
-              <td>
-                 ${app.canEdit ? `<button class="btn btn-sm btn-outline-primary" onclick="editApplication('${app.id}')">修正</button>` : '-'}
-              </td>
-            </tr>`).join('');
+      if(!data || data.length <= 1) return alert('有効なデータがありません');
+      const csv = data.map(row => row.map(cell => {
+        let s = String(cell || "");
+        if (s.includes(',') || s.includes('\n') || s.includes('"')) return `"${s.replace(/"/g, '""')}"`;
+        return s;
+      }).join(',')).join('\n');
+      const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
+      const blob = new Blob([bom, csv], { type: 'text/csv' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `kanjo_export_${new Date().toISOString().slice(0,10)}.csv`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      if(confirm('CSV出力を完了しました。ステータスを「CSV出力済み」に更新しますか？')) {
+        google.script.run.withSuccessHandler(() => loadAdminData()).markAsExported(ids);
       }
-      updateBulkButton();
-      
-      const allContainer = document.getElementById('allAppListContainer');
-      const appContainer = document.getElementById('approvalListContainer');
-      
-      if(currentUser.role === '経理') renderGroupedList(data.allApplications, allContainer, false);
-      renderGroupedList(data.approvalTasks, appContainer, true);
-      document.getElementById('badgeCount').textContent = data.approvalTasks.length;
-
-    }).getDashboardData(currentUser.email);
+      showLoading(false);
+    }).getDataForCSV(ids);
   }
 
-  function editApplication(id) {
-     pendingDrafts = [];
-     fetchAndOpenDraft(id, true);
+  function fetchAndOpenDraft(id, edit) {
+    showLoading(true);
+    google.script.run.withSuccessHandler(d => { showLoading(false); openEditWithData(d, edit); }).getApplicationDetail(id);
+  }
+
+  function openEditWithData(data, edit) {
+    document.getElementById('editId').value = data.id;
+    const isManual = !data.fileBase64;
+    document.getElementById('modalRow').className = isManual ? 'row g-0 h-100 manual-mode' : 'row g-0 h-100';
+    document.getElementById('mobileTabNav').style.display = isManual ? 'none' : 'flex';
+    
+    const img = document.getElementById('previewImg'), no = document.getElementById('noPreview');
+    if (data.fileBase64) { img.src = `data:${data.mimeType};base64,${data.fileBase64}`; img.style.display = 'block'; no.style.display = 'none'; }
+    else { img.style.display = 'none'; no.style.display = 'block'; }
+
+    document.getElementById('formDate').value = data.useDate;
+    document.getElementById('formUserName').value = data.userName;
+    document.getElementById('formStore').value = data.storeName;
+    document.getElementById('formTotalAmount').value = data.totalAmount;
+    detailData = data.items;
+    
+    document.getElementById('modalActions').innerHTML = `<button class="btn btn-sm btn-outline-secondary me-2" data-bs-dismiss="modal">キャンセル</button><button class="btn btn-primary btn-sm px-3 shadow-sm fw-bold" onclick="saveEdit()">保存</button>`;
+    renderDetailItems();
+    editModal.show();
+  }
+
+  function renderDetailItems() {
+    document.getElementById('detailItemsContainer').innerHTML = detailData.map((item, i) => `
+        <div class="detail-card mb-3">
+          <div class="row g-2">
+            <div class="col-6"><label class="form-label">項目名</label><input type="text" class="form-control form-control-sm" list="itemNameList" value="${item.itemName}" onchange="detailData[${i}].itemName=this.value; checkAllowanceAmount()"></div>
+            <div class="col-6"><label class="form-label">科目</label><input type="text" class="form-control form-control-sm" list="categoryList" value="${item.category}" onchange="detailData[${i}].category=this.value"></div>
+            <div class="col-4"><label class="form-label">金額</label><input type="number" class="form-control form-control-sm text-end" value="${item.total_price}" oninput="detailData[${i}].total_price=this.value; calcHeaderTotal()"></div>
+            <div class="col-8"><label class="form-label">明細メモ</label><input type="text" class="form-control form-control-sm" value="${item.memo||''}" oninput="detailData[${i}].memo=this.value"></div>
+          </div>
+        </div>`).join('');
+    calcHeaderTotal();
+  }
+
+  function checkAllowanceAmount() {
+    const isAllow = document.getElementById('checkIsAllowance').checked;
+    const user = userMasters.find(u => u.name === document.getElementById('formUserName').value);
+    if (isAllow) {
+        document.getElementById('storeNameRow').classList.add('d-none');
+        detailData[0].itemName = '日当';
+        detailData[0].category = '旅費交通費';
+        detailData[0].total_price = (user && user.position === '役員') ? 3000 : 2000;
+        renderDetailItems();
+    } else {
+        document.getElementById('storeNameRow').classList.remove('d-none');
+    }
+  }
+
+  function calcHeaderTotal() { let sum = 0; detailData.forEach(d => sum += Number(d.total_price)||0); document.getElementById('formTotalAmount').value = sum; }
+  function addDetailItem() { detailData.push({category:'', itemName:'', total_price:0, memo:''}); renderDetailItems(); }
+  function saveEdit() {
+    showLoading(true);
+    const payload = { id: document.getElementById('editId').value, useDate: document.getElementById('formDate').value, userName: document.getElementById('formUserName').value, storeName: document.getElementById('formStore').value, totalAmount: document.getElementById('formTotalAmount').value, items: detailData };
+    google.script.run.withSuccessHandler(() => { editModal.hide(); loadDashboard(); showLoading(false); }).updateApplication(payload);
   }
   
-  function getStatusColor(s) { return {承認済:'success',承認待ち:'warning',差戻し:'danger',未申請:'secondary'}[s] || 'secondary'; }
-  function toggleAllChecks(source) { document.querySelectorAll('.bulk-check').forEach(c => c.checked = source.checked); updateBulkButton(); }
-  function updateBulkButton() {
-      const count = document.querySelectorAll('.bulk-check:checked').length;
-      const btn = document.getElementById('btnBulkSubmit');
-      btn.disabled = count === 0;
-      btn.innerHTML = `<i class="fas fa-paper-plane me-2"></i>選択した${count}件を一括申請`;
-  }
-  function submitBulk() {
-      const ids = Array.from(document.querySelectorAll('.bulk-check:checked')).map(c => c.value);
-      if(!ids.length) return;
-      if(!confirm(`${ids.length}件を申請しますか？`)) return;
-      showLoading(true);
-      google.script.run.withSuccessHandler(res => {
-         alert(res.message); loadDashboard(); showLoading(false);
-      }).submitBulkApplications(ids);
-  }
-  
-  function renderGroupedList(rows, container, isApproval) {
-      if(!rows || !rows.length) { container.innerHTML = '<div class="text-center p-3 text-muted">なし</div>'; return; }
-      const grouped = {};
-      rows.forEach(r => { const d = r.date||'不明'; if(!grouped[d]) grouped[d]=[]; grouped[d].push(r); });
-      
-      container.innerHTML = Object.keys(grouped).sort().reverse().map(date => `
-        <div class="group-header"><span>${date}</span><span class="badge bg-secondary">${grouped[date].length}件</span></div>
-        <table class="table table-hover table-sm mb-0 bg-white">
-           <thead><tr><th>申請者</th><th>利用日</th><th>支払先</th><th>金額</th><th>状態</th><th>操作</th></tr></thead>
-           <tbody>${grouped[date].map(app => `
-              <tr>
-                 <td class="fw-bold">${app.user}</td><td>${app.useDate}</td><td>${app.store}</td><td>¥${Number(app.amount).toLocaleString()}</td>
-                 <td><span class="badge bg-${getStatusColor(app.status)}">${app.status}</span></td>
-                 <td>
-                    ${isApproval ? 
-                      `<button class="btn btn-sm btn-primary me-1" onclick="approveApp('${app.id}')">承認</button>
-                       <button class="btn btn-sm btn-outline-danger" onclick="rejectApp('${app.id}')">戻</button>` 
-                      : (app.canEdit ? `<button class="btn btn-sm btn-outline-primary" onclick="editApplication('${app.id}')">修正</button>`:'-')}
-                 </td>
-              </tr>`).join('')}
-           </tbody>
-        </table>`).join('');
-  }
-  
-  function approveApp(id) { if(confirm('承認しますか？')) google.script.run.withSuccessHandler(()=>{alert('承認済');loadDashboard();}).approveApplication(id, currentUser.email); }
-  function rejectApp(id) { const reason = prompt('理由'); if(reason) google.script.run.withSuccessHandler(()=>{alert('差戻済');loadDashboard();}).rejectApplication(id, reason); }
-  function downloadCSV(type) { showLoading(true); google.script.run.withSuccessHandler(res=>{/* 省略(Blob DL) */ showLoading(false);}).generateCSV(type); }
-  function showLoading(show, txt='処理中...') { document.getElementById('loadingOverlay').style.display = show ? 'flex':'none'; document.getElementById('loadingText').textContent = txt; }
-  function filterGroupedApps(id) { /* 省略(フィルタロジック) */ }
+  function loadDashboard() { google.script.run.withSuccessHandler(d => {
+    // ダッシュボード更新（ボタンを左端へ）
+    document.getElementById('myAppList').innerHTML = d.myApplications.map(app => `<tr>
+        <td><button class="btn btn-sm btn-outline-primary btn-edit-unify" onclick="fetchAndOpenDraft('${app.id}', true)"><i class="fas fa-edit me-1"></i>修正・確認</button></td>
+        <td>${app.canSubmit?`<input type="checkbox" class="history-check" value="${app.id}">`:''}</td>
+        <td>${app.useDate}</td><td>${app.store}</td><td>¥${Number(app.amount).toLocaleString()}</td>
+        <td><span class="badge bg-secondary">${app.status}</span></td><td>${app.approver}</td>
+    </tr>`).join('');
+
+    // 承認タスク更新（テーブル形式でボタンを左端へ）
+    document.getElementById('badgeCount').textContent = d.approvalTasks.length;
+    document.getElementById('approvalListContainer').innerHTML = d.approvalTasks.map(app => `
+      <tr>
+        <td><button class="btn btn-sm btn-outline-primary btn-edit-unify" onclick="fetchAndOpenDraft('${app.id}', false)"><i class="fas fa-search me-1"></i>修正・確認</button></td>
+        <td><b>${app.user}</b></td><td>${app.useDate}</td><td>${app.store}</td>
+        <td class="text-end fw-bold">¥${Number(app.amount).toLocaleString()}</td>
+        <td><button class="btn btn-sm btn-primary w-100" onclick="google.script.run.withSuccessHandler(loadDashboard).approveApplication('${app.id}')">承認</button></td>
+      </tr>`).join('') || '<tr><td colspan="6" class="text-center py-3 text-muted">なし</td></tr>';
+
+  }).getDashboardData(currentUser.email); }
+
+  function showLoading(s, t='処理中...') { document.getElementById('loadingOverlay').style.display = s?'flex':'none'; document.getElementById('loadingText').textContent = t; }
 </script>
 </body>
 </html>
