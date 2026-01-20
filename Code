@@ -1,6 +1,6 @@
 /**
  * 現金経費精算アプリ - サーバーサイドスクリプト
- * v11.1: 一括申請・画像取得・グルーピング対応版
+ * v12.0: ゲスト申請・AI学習強化・一括ドラフト作成対応版
  */
 
 // 定数定義：シート名
@@ -44,7 +44,7 @@ function setupSpreadsheet() {
     [SHEETS.DETAILS]: ['明細ID', '親登録ID', '勘定科目', '項目名', '日当・宿泊', '取引先', '参加人数', '金額(税込)', '税抜', '消費税', 'メモ'],
     [SHEETS.ACCOUNTS]: ['科目名', 'メモ'],
     [SHEETS.USERS]: ['氏名', 'メールアドレス', '権限', '銀行コード', '修正可否'],
-    [SHEETS.LEARNING]: ['品目キーワード', '正解勘定科目', '登録回数'],
+    [SHEETS.LEARNING]: ['キーワード', '正解勘定科目', '登録回数', '種別'], // 種別列を追加
     [SHEETS.RULES]: ['ルールID', '優先順位', '対象科目', '金額条件', 'キーワード条件', '日当条件', '必須承認者ルート'],
     [SHEETS.CSV_CONFIG]: ['出力種別', '列順', 'ヘッダー名', '参照元', 'カラム名', 'フォーマット指定', '文字コード']
   };
@@ -68,7 +68,7 @@ function createColumnMap(headerRow) {
   return map;
 }
 
-// --- ユーザー認証 ---
+// --- ユーザー認証 (ゲスト対応) ---
 function getCurrentUser(manualEmail = null) {
   const email = manualEmail || Session.getActiveUser().getEmail();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -100,7 +100,14 @@ function getCurrentUser(manualEmail = null) {
       };
     }
   }
-  return { name: '未登録ユーザー', email: email, role: 'UNREGISTERED', canFix: false };
+  
+  // ★変更: 未登録でも「ゲスト」として通過させる
+  return { 
+    name: '', // 名前は空にして画面で入力させる
+    email: email, 
+    role: 'ゲスト', 
+    canFix: true 
+  };
 }
 
 function getSpreadsheetUrl() {
@@ -115,13 +122,16 @@ function getDashboardData(userEmail) {
   
   const result = { user: user, myApplications: [], approvalTasks: [], allApplications: [] };
 
-  if (user.role === 'UNREGISTERED') return result;
+  // ゲストの場合も自分の申請（emailまたは名前で紐づくもの）は見せたいが、
+  // 現状のロジックは「User名」の一致で見ているため、申請時に正しい名前を入力していれば表示される。
+  // ここではUnregisteredではじく処理は削除。
   if (rSheet.getLastRow() <= 1) return result;
 
   const data = rSheet.getDataRange().getValues();
   const colMap = createColumnMap(data[0]);
   const rows = data.slice(1);
   
+  // ユーザー名が未設定（ゲスト初期状態）の場合はマッチングできないので空文字扱い
   const currentUserName = String(user.name).trim();
 
   const idxId = colMap['登録ID'];
@@ -145,6 +155,7 @@ function getDashboardData(userEmail) {
     
     const status = row[idxStatus];
     const approver = String(row[idxApprover]).trim();
+    const rowUser = String(row[idxUser]).trim();
 
     // 修正・申請可能か判定
     const isStatusEditable = (status === STATUS.DRAFT) || (status === STATUS.REJECTED);
@@ -153,10 +164,10 @@ function getDashboardData(userEmail) {
 
     const item = {
       id: row[idxId], 
-      date: formatDateStr(row[idxDate]), // 登録日（グルーピングに使用）
+      date: formatDateStr(row[idxDate]), 
       appType: idxAppType !== undefined ? row[idxAppType] : '', 
       useDate: formatDateStr(row[idxUseDate]),
-      user: row[idxUser], 
+      user: rowUser, 
       store: row[idxStore], 
       amount: row[idxAmount], 
       category: '詳細', 
@@ -167,8 +178,14 @@ function getDashboardData(userEmail) {
     };
 
     // 1. マイ申請履歴
-    if (String(item.user).trim() === currentUserName) {
+    // 登録名が一致、またはゲストでまだ名前が保存されていない場合も考慮（セッションベースの制御は今回簡易版なので名寄せのみ）
+    if (currentUserName && rowUser === currentUserName) {
         myApplications.push(item);
+    } else if (!currentUserName && user.email === Session.getActiveUser().getEmail()) {
+        // ※ゲストの場合、名前が空だと一致しないため、厳密にはクッキーや別ロジックが必要だが、
+        // 今回は「申請時に名前を入力」するため、その名前がブラウザに残っている前提か、
+        // もしくは「ゲスト」ロールで全件表示などを避けるため、名前一致のみとする。
+        // (補足: 実運用ではゲストもCookie等で名前を保持するか、EmailをDBに記録することを推奨)
     }
     
     // 2. 承認タスク
@@ -183,7 +200,7 @@ function getDashboardData(userEmail) {
   });
 
   result.myApplications = myApplications.reverse();
-  result.approvalTasks = approvalTasks.reverse(); // 新しい順
+  result.approvalTasks = approvalTasks.reverse(); 
   if (user.role === '経理') {
       result.allApplications = allApplications.reverse();
   }
@@ -191,7 +208,7 @@ function getDashboardData(userEmail) {
   return result;
 }
 
-// --- 申請詳細取得 (修正用 + 画像取得) ---
+// --- 申請詳細取得 ---
 function getApplicationDetail(id) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const rSheet = ss.getSheetByName(SHEETS.RECEIPTS);
@@ -219,6 +236,7 @@ function getApplicationDetail(id) {
         id: rData[i][idxId],
         appType: rData[i][rColMap['申請区分']],
         useDate: formatDate(rData[i][rColMap['利用日']]),
+        userName: rData[i][rColMap['使用者']], // 申請者名を追加
         storeName: rData[i][rColMap['支払先']],
         totalAmount: rData[i][rColMap['合計金額']],
         memo: rData[i][rColMap['メモ']],
@@ -234,7 +252,6 @@ function getApplicationDetail(id) {
 
   if (!receipt) throw new Error('データが見つかりません');
 
-  // 画像データの取得
   if (fileId && fileId !== 'NO_FILE' && fileId !== 'SAVE_ERROR') {
     try {
       const file = DriveApp.getFileById(fileId);
@@ -243,11 +260,9 @@ function getApplicationDetail(id) {
       receipt.mimeType = blob.getContentType();
     } catch (e) {
       console.error('画像取得エラー:', e);
-      // エラーでも処理は続行（画像なしとして扱う）
     }
   }
 
-  // 明細データの取得
   const dData = dSheet.getDataRange().getValues();
   const dColMap = createColumnMap(dData[0]);
   const idxDParent = dColMap['親登録ID'];
@@ -306,6 +321,17 @@ function saveApplication(formData, itemsData) {
     const initialStatus = STATUS.DRAFT;
     const firstApprover = '-';
 
+    // 学習データの更新（品目と店名）
+    finalItems.forEach(item => {
+        if (item.category) {
+            updateLearningData(item.itemName, item.category, 'CATEGORY');
+            // 店名があれば店名→科目の学習も行う
+            if (formData.storeName) {
+                updateLearningData(formData.storeName, item.category, 'STORE_TO_CATEGORY');
+            }
+        }
+    });
+
     // 1. 領収書シート(Header)
     const rHeaders = rSheet.getRange(1, 1, 1, rSheet.getLastColumn()).getValues()[0];
     const rRowData = rHeaders.map(header => {
@@ -315,7 +341,7 @@ function saveApplication(formData, itemsData) {
         case '登録日時': return now;
         case '申請区分': return formData.appType;
         case '利用日': return formData.useDate;
-        case '使用者': return formData.userName;
+        case '使用者': return formData.userName; // 入力された氏名を使用
         case '支払先': return formData.storeName;
         case '合計金額': return formData.totalAmount;
         case 'メモ': return formData.memo;
@@ -332,8 +358,6 @@ function saveApplication(formData, itemsData) {
     // 2. 明細シート(Detail)
     const dHeaders = dSheet.getRange(1, 1, 1, dSheet.getLastColumn()).getValues()[0];
     finalItems.forEach(item => {
-      if (item.category) updateLearningData(item.itemName, item.category);
-      
       const price = Number(item.total_price);
       const subtotal = Math.round(price / 1.1);
       const tax = price - subtotal;
@@ -382,7 +406,6 @@ function updateApplication(formData) {
 
     if (!id) throw new Error('更新対象のIDが指定されていません');
 
-    // 画像更新処理
     let fileId = null;
     if (formData.fileBase64) {
       try {
@@ -416,6 +439,7 @@ function updateApplication(formData) {
     setVal('登録日時', now); 
     setVal('申請区分', formData.appType);
     setVal('利用日', formData.useDate);
+    setVal('使用者', formData.userName); // 修正時も名前を更新（ゲストが名前を入れた場合など）
     setVal('支払先', formData.storeName);
     setVal('合計金額', formData.totalAmount);
     setVal('メモ', formData.memo);
@@ -428,7 +452,6 @@ function updateApplication(formData) {
        setVal('ファイルID', fileId);
     }
 
-    // 2. 明細シート(Detail)更新
     const dData = dSheet.getDataRange().getValues();
     const dColMap = createColumnMap(dData[0]);
     const idxDParent = dColMap['親登録ID'];
@@ -442,7 +465,14 @@ function updateApplication(formData) {
     const dHeaders = dSheet.getRange(1, 1, 1, dSheet.getLastColumn()).getValues()[0];
     
     items.forEach(item => {
-      if (item.category) updateLearningData(item.itemName, item.category);
+      // 学習データの更新
+      if (item.category) {
+          updateLearningData(item.itemName, item.category, 'CATEGORY');
+          if (formData.storeName) {
+              updateLearningData(formData.storeName, item.category, 'STORE_TO_CATEGORY');
+          }
+      }
+
       const price = Number(item.total_price);
       const subtotal = Math.round(price / 1.1);
       const tax = price - subtotal;
@@ -550,11 +580,10 @@ function submitBulkApplications(ids) {
   }
 }
 
-// 単一申請用（一括申請関数を利用）
+// 単一申請用
 function submitApplicationFromDashboard(id) {
     return submitBulkApplications([id]);
 }
-
 
 // --- 申請削除処理 ---
 function deleteApplication(id) {
@@ -746,25 +775,123 @@ function analyzeReceiptImage(base64Image, mimeType) {
   }
 }
 
-// --- 学習データ関連 ---
-function updateLearningData(itemName, category) {
-  if (!itemName || !category) return;
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(SHEETS.LEARNING);
-  sheet.appendRow([itemName, category, 1]);
+// --- ★追加機能: ファイルアップロード & AI解析 & 下書き保存 (一括登録用) ---
+function uploadAndAnalyzeAndDraft(fileData) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) throw new Error('サーバーが混み合っています。再試行してください。');
+  
+  try {
+    const user = getCurrentUser(fileData.userName); // 名前で取得を試みるが、なければゲストとして扱う
+
+    // 1. ファイル保存
+    let fileId = 'NO_FILE';
+    try {
+      const blob = Utilities.newBlob(Utilities.base64Decode(fileData.base64), fileData.mimeType, fileData.fileName);
+      const folder = RECEIPT_FOLDER_ID ? DriveApp.getFolderById(RECEIPT_FOLDER_ID) : DriveApp.getRootFolder();
+      fileId = folder.createFile(blob).getId();
+    } catch(e) {
+      console.error('File Save Error', e);
+    }
+
+    // 2. AI解析
+    let aiResult = {};
+    try {
+      aiResult = analyzeReceiptImage(fileData.base64, fileData.mimeType);
+    } catch (e) {
+      console.warn("AI解析失敗:", e);
+      // 解析失敗時はデフォルト値で下書き作成
+    }
+
+    // 3. DB保存 (下書きステータスで保存)
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const rSheet = ss.getSheetByName(SHEETS.RECEIPTS);
+    const dSheet = ss.getSheetByName(SHEETS.DETAILS);
+    const regId = Utilities.getUuid();
+    const now = new Date();
+    
+    // 申請者名：登録ユーザーならその名前、ゲストなら引数のuserName(空なら空文字)
+    const applicantName = user.role !== 'ゲスト' ? user.name : (fileData.userName || '');
+
+    const rRow = [
+      regId,
+      now,
+      '営業所', // デフォルト値
+      aiResult.use_date || now,
+      applicantName,
+      aiResult.store_name || '',
+      aiResult.total_amount || 0,
+      aiResult.summary_text || '',
+      fileData.fileName,
+      fileId,
+      aiResult.has_invoice ? true : false,
+      STATUS.DRAFT, // ★未申請として保存
+      '-'
+    ];
+    rSheet.appendRow(rRow);
+
+    const price = Number(aiResult.total_amount) || 0;
+    const subtotal = Math.round(price / 1.1);
+    const tax = price - subtotal;
+    
+    const dRow = [
+      Utilities.getUuid(),
+      regId,
+      aiResult.category || '',
+      aiResult.item_name || '品代',
+      false,
+      aiResult.client || '',
+      aiResult.participants || '',
+      price,
+      subtotal,
+      tax,
+      ''
+    ];
+    dSheet.appendRow(dRow);
+    
+    // AI学習データの更新 (店名・品目)
+    if (aiResult.category) {
+        if (aiResult.item_name) updateLearningData(aiResult.item_name, aiResult.category, 'CATEGORY');
+        if (aiResult.store_name) updateLearningData(aiResult.store_name, aiResult.category, 'STORE_TO_CATEGORY');
+    }
+    
+    return { success: true, id: regId, fileId: fileId };
+
+  } catch(e) {
+    throw new Error('処理エラー: ' + e.message);
+  } finally {
+    lock.releaseLock();
+  }
 }
 
-function predictCategoryByItem(itemName) {
+
+// --- 学習データ関連 (拡張) ---
+function updateLearningData(key, value, type = 'CATEGORY') {
+  if (!key || !value) return;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SHEETS.LEARNING);
+  // 列構成: [キーワード, 正解値, 回数, 種別]
+  // 簡易的に追記 (本来はUpsertが望ましい)
+  sheet.appendRow([key, value, 1, type]);
+}
+
+// 汎用予測関数
+function predictCategory(text, type = 'CATEGORY') {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(SHEETS.LEARNING);
   const data = sheet.getDataRange().getValues();
   const counts = {};
+  
   for (let i = 1; i < data.length; i++) {
-    if (data[i][0] === itemName) {
+    // データ列: [キーワード(0), 正解(1), 回数(2), 種別(3)]
+    const rowKey = data[i][0];
+    const rowType = data[i][3] || 'CATEGORY'; // 古いデータはCATEGORY扱い
+
+    if (rowKey === text && rowType === type) {
       const cat = data[i][1];
       counts[cat] = (counts[cat] || 0) + Number(data[i][2] || 1);
     }
   }
+
   let max = 0;
   let bestCategory = '';
   for (const [cat, count] of Object.entries(counts)) {
@@ -773,21 +900,9 @@ function predictCategoryByItem(itemName) {
   return bestCategory; 
 }
 
-function suggestItemsByCategory(category) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(SHEETS.LEARNING);
-  const data = sheet.getDataRange().getValues();
-  const suggestions = {};
-  for (let i = 1; i < data.length; i++) {
-    if (data[i][1] === category) {
-      const name = data[i][0];
-      suggestions[name] = (suggestions[name] || 0) + Number(data[i][2] || 1);
-    }
-  }
-  return Object.entries(suggestions)
-    .sort((a, b) => b[1] - a[1])
-    .map(s => s[0])
-    .slice(0, 10);
+// 互換性のために残す（既存のコードが呼んでいる場合）
+function predictCategoryByItem(itemName) {
+    return predictCategory(itemName, 'CATEGORY');
 }
 
 function getMasters() {
