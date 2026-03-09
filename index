@@ -54,8 +54,8 @@
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav"><span class="navbar-toggler-icon"></span></button>
     <div class="collapse navbar-collapse" id="navbarNav">
       <ul class="navbar-nav me-auto">
-        <li class="nav-item"><a class="nav-link active" id="nav-apply" href="#" onclick="showView('apply'); resetApplyForm();">新規登録</a></li>
-        <li class="nav-item"><a class="nav-link" id="nav-dashboard" href="#" onclick="showView('dashboard')">ダッシュボード</a></li>
+        <li class="nav-item"><a class="nav-link" id="nav-apply" href="#" onclick="showView('apply')">新規登録</a></li>
+        <li class="nav-item"><a class="nav-link active" id="nav-dashboard" href="#" onclick="showView('dashboard')">ダッシュボード</a></li>
         <li class="nav-item" id="navApproval" style="display:none;"><a class="nav-link" id="nav-approvalList" href="#" onclick="showView('approvalList')">承認タスク <span class="badge bg-danger" id="badgeCount">0</span></a></li>
         <li class="nav-item" id="navAdmin" style="display:none;"><a class="nav-link" id="nav-admin" href="#" onclick="showView('admin')">管理・出力</a></li>
       </ul>
@@ -81,10 +81,22 @@
              <div class="alert alert-light border small mb-0 py-2"><i class="fas fa-info-circle me-1"></i> [未申請]を選択してまとめて申請できます。</div>
              <button class="btn btn-success btn-sm" id="btnBulkSubmit" onclick="submitBulk()" disabled><i class="fas fa-paper-plane me-2"></i>一括申請</button>
           </div>
-          <table class="table table-hover align-middle">
-            <thead><tr><th width="100">修正・確認</th><th width="40"><input type="checkbox" onclick="toggleAll(this, '.history-check')"></th><th>利用日</th><th>支払先</th><th>金額</th><th>状態</th><th>承認者</th></tr></thead>
-            <tbody id="myAppList"></tbody>
-          </table>
+          <div class="table-responsive">
+            <table class="table table-hover align-middle">
+              <thead>
+                <tr>
+                  <th width="40"><input type="checkbox" onclick="toggleAll(this, '.history-check'); updateBulkSubmitButton();"></th>
+                  <th width="100">修正・確認</th>
+                  <th>利用日</th>
+                  <th>支払先</th>
+                  <th>金額</th>
+                  <th>状態</th>
+                  <th>承認者</th>
+                </tr>
+              </thead>
+              <tbody id="myAppList"></tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>
@@ -160,8 +172,8 @@
             <table class="table table-hover align-middle mb-0">
                 <thead class="sticky-top bg-light">
                     <tr>
-                        <th width="100">修正・確認</th>
                         <th width="40"><input type="checkbox" onclick="toggleAll(this, '.admin-check')"></th>
+                        <th width="100">修正・確認</th>
                         <th style="cursor:pointer" onclick="sortAdminData('useDate')">利用日 <i class="fas fa-sort small opacity-50"></i></th>
                         <th>申請者</th>
                         <th>支払先</th>
@@ -189,7 +201,7 @@
               <th>利用日</th>
               <th>支払先</th>
               <th class="text-end">金額</th>
-              <th width="100">操作</th>
+              <th width="150">操作</th>
             </tr>
           </thead>
           <tbody id="approvalListContainer"></tbody>
@@ -250,7 +262,7 @@
 <datalist id="itemNameList"><option value="日当"><option value="宿泊"><option value="燃料代"><option value="公共交通機関"></datalist>
 
 <script>
-  let currentUser = null, historyData = [], detailData = [], editModal = null, pendingDrafts = [], currentDraftIndex = -1, adminSortKey = 'useDate', adminSortOrder = 1, userMasters = [];
+  let currentUser = null, historyData = [], detailData = [], editModal = null, userMasters = [];
 
   window.onload = function() {
     editModal = new bootstrap.Modal(document.getElementById('editModal'));
@@ -273,7 +285,7 @@
           document.getElementById('navApproval').style.display = 'block';
           document.getElementById('navAdmin').style.display = 'block';
       }
-      loadMasters(); loadDashboard(); showView('apply'); showLoading(false);
+      loadMasters(); loadDashboard(); showView('dashboard'); showLoading(false);
     }).getCurrentUser();
   }
 
@@ -316,8 +328,8 @@
 
     tbody.innerHTML = filtered.map(r => `
         <tr style="cursor:pointer" onclick="fetchAndOpenDraft('${r.id}', true)">
-            <td><button class="btn btn-sm btn-outline-primary btn-edit-unify py-0"><i class="fas fa-edit me-1"></i>修正・確認</button></td>
             <td onclick="event.stopPropagation()"><input type="checkbox" class="admin-check" value="${r.id}"></td>
+            <td><button class="btn btn-sm btn-outline-primary btn-edit-unify py-0"><i class="fas fa-edit me-1"></i>修正・確認</button></td>
             <td>${r.useDate}</td><td>${r.user}</td><td><b>${r.store}</b></td><td><small>${r.category}</small></td>
             <td class="text-end fw-bold">¥${Number(r.amount).toLocaleString()}</td>
             <td class="text-center"><span class="badge ${r.status==='確認済み'?'bg-info':'bg-warning text-dark'}">${r.status}</span></td>
@@ -331,17 +343,17 @@
 
   function processAdminAction(func) {
     const ids = Array.from(document.querySelectorAll('.admin-check:checked')).map(c => c.value);
-    if(!ids.length) return alert('項目を選択してください');
+    if(!ids.length) return;
     showLoading(true);
     google.script.run.withSuccessHandler(() => { showLoading(false); loadAdminData(); })[func](ids);
   }
 
   function downloadCSV() {
     const ids = Array.from(document.querySelectorAll('.admin-check:checked')).map(c => c.value);
-    if(!ids.length) return alert('出力する項目を選択してください');
+    if(!ids.length) return;
     showLoading(true, 'CSV作成中...');
     google.script.run.withSuccessHandler(data => {
-      if(!data || data.length <= 1) return alert('有効なデータがありません');
+      if(!data || data.length <= 1) return;
       const csv = data.map(row => row.map(cell => {
         let s = String(cell || "");
         if (s.includes(',') || s.includes('\n') || s.includes('"')) return `"${s.replace(/"/g, '""')}"`;
@@ -353,11 +365,86 @@
       a.href = URL.createObjectURL(blob);
       a.download = `kanjo_export_${new Date().toISOString().slice(0,10)}.csv`;
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      if(confirm('CSV出力を完了しました。ステータスを「CSV出力済み」に更新しますか？')) {
-        google.script.run.withSuccessHandler(() => loadAdminData()).markAsExported(ids);
-      }
+      google.script.run.withSuccessHandler(() => loadAdminData()).markAsExported(ids);
       showLoading(false);
     }).getDataForCSV(ids);
+  }
+
+  function resetApplyForm() {
+    document.getElementById('editId').value = '';
+    document.getElementById('formDate').value = new Date().toISOString().slice(0,10);
+    document.getElementById('formUserName').value = currentUser ? currentUser.name : '';
+    document.getElementById('formStore').value = '';
+    document.getElementById('formTotalAmount').value = 0;
+    document.getElementById('checkIsAllowance').checked = false;
+    document.getElementById('storeNameRow').classList.remove('d-none');
+    detailData = [{category:'', itemName:'', total_price:0, memo:''}];
+  }
+
+  function startManualEntry() {
+    resetApplyForm();
+    openEditWithData({
+      id: '',
+      useDate: new Date().toISOString().slice(0,10),
+      userName: currentUser.name,
+      storeName: '',
+      totalAmount: 0,
+      items: [{category:'', itemName:'', total_price:0, memo:''}],
+      fileBase64: null
+    }, true);
+  }
+
+  /**
+   * 領収書の読み込みとAI解析の開始
+   */
+  function handleFiles(files) {
+    if (!files || files.length === 0) return;
+    showLoading(true, 'AI解析中...'); // 仮の文字ではなく、解析が終わるのを待つ
+    
+    let count = 0;
+    Array.from(files).forEach(file => {
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const payload = {
+          fileName: file.name,
+          mimeType: file.type,
+          fileBase64: e.target.result.split(',')[1],
+          appType: '個人',
+          useDate: new Date().toISOString().slice(0,10),
+          userName: currentUser.name
+        };
+        // サーバーサイドでAI解析を実行し、保存された全データを返してもらう
+        google.script.run.withSuccessHandler(res => {
+          count++;
+          if (count === files.length) {
+            showLoading(false);
+            if (res && res.id) {
+              // 解析が完了したデータを使って、そのまま編集画面を開く
+              fetchAndOpenDraft(res.id, true);
+            } else {
+              loadDashboard();
+            }
+          }
+        }).uploadAndAnalyzeAndDraft(payload);
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function updateBulkSubmitButton() {
+    const checkedCount = document.querySelectorAll('.history-check:checked').length;
+    document.getElementById('btnBulkSubmit').disabled = (checkedCount === 0);
+  }
+
+  function submitBulk() {
+    const ids = Array.from(document.querySelectorAll('.history-check:checked')).map(c => c.value);
+    if(!ids.length) return;
+    showLoading(true, '一括申請中...');
+    google.script.run.withSuccessHandler(() => {
+      showLoading(false);
+      loadDashboard();
+      document.getElementById('btnBulkSubmit').disabled = true;
+    }).updateStatusBulk(ids, '承認待ち');
   }
 
   function fetchAndOpenDraft(id, edit) {
@@ -415,31 +502,48 @@
 
   function calcHeaderTotal() { let sum = 0; detailData.forEach(d => sum += Number(d.total_price)||0); document.getElementById('formTotalAmount').value = sum; }
   function addDetailItem() { detailData.push({category:'', itemName:'', total_price:0, memo:''}); renderDetailItems(); }
+  
   function saveEdit() {
     showLoading(true);
     const payload = { id: document.getElementById('editId').value, useDate: document.getElementById('formDate').value, userName: document.getElementById('formUserName').value, storeName: document.getElementById('formStore').value, totalAmount: document.getElementById('formTotalAmount').value, items: detailData };
-    google.script.run.withSuccessHandler(() => { editModal.hide(); loadDashboard(); showLoading(false); }).updateApplication(payload);
+    if (!payload.id) {
+       google.script.run.withSuccessHandler(() => { editModal.hide(); loadDashboard(); showLoading(false); }).saveApplication(payload, detailData);
+    } else {
+       google.script.run.withSuccessHandler(() => { editModal.hide(); loadDashboard(); showLoading(false); }).updateApplication(payload);
+    }
+  }
+
+  function rejectApplicationPrompt(id) {
+    const reason = window.prompt("差戻し理由を入力してください：");
+    if (reason === null) return;
+    showLoading(true, "差戻し処理中...");
+    google.script.run.withSuccessHandler(() => {
+      showLoading(false);
+      loadDashboard();
+    }).rejectApplication(id, reason);
   }
   
   function loadDashboard() { google.script.run.withSuccessHandler(d => {
-    // ダッシュボード更新（ボタンを左端へ）
     document.getElementById('myAppList').innerHTML = d.myApplications.map(app => `<tr>
+        <td>${app.canSubmit?`<input type="checkbox" class="history-check" value="${app.id}" onchange="updateBulkSubmitButton()">`:''}</td>
         <td><button class="btn btn-sm btn-outline-primary btn-edit-unify" onclick="fetchAndOpenDraft('${app.id}', true)"><i class="fas fa-edit me-1"></i>修正・確認</button></td>
-        <td>${app.canSubmit?`<input type="checkbox" class="history-check" value="${app.id}">`:''}</td>
         <td>${app.useDate}</td><td>${app.store}</td><td>¥${Number(app.amount).toLocaleString()}</td>
         <td><span class="badge bg-secondary">${app.status}</span></td><td>${app.approver}</td>
-    </tr>`).join('');
+    </tr>`).join('') || '<tr><td colspan="7" class="text-center py-3 text-muted">履歴はありません</td></tr>';
 
-    // 承認タスク更新（テーブル形式でボタンを左端へ）
     document.getElementById('badgeCount').textContent = d.approvalTasks.length;
     document.getElementById('approvalListContainer').innerHTML = d.approvalTasks.map(app => `
       <tr>
         <td><button class="btn btn-sm btn-outline-primary btn-edit-unify" onclick="fetchAndOpenDraft('${app.id}', false)"><i class="fas fa-search me-1"></i>修正・確認</button></td>
         <td><b>${app.user}</b></td><td>${app.useDate}</td><td>${app.store}</td>
         <td class="text-end fw-bold">¥${Number(app.amount).toLocaleString()}</td>
-        <td><button class="btn btn-sm btn-primary w-100" onclick="google.script.run.withSuccessHandler(loadDashboard).approveApplication('${app.id}')">承認</button></td>
+        <td>
+          <div class="d-flex gap-1">
+            <button class="btn btn-sm btn-primary flex-grow-1" onclick="google.script.run.withSuccessHandler(loadDashboard).approveApplication('${app.id}')">承認</button>
+            <button class="btn btn-sm btn-outline-danger" onclick="rejectApplicationPrompt('${app.id}')">差戻</button>
+          </div>
+        </td>
       </tr>`).join('') || '<tr><td colspan="6" class="text-center py-3 text-muted">なし</td></tr>';
-
   }).getDashboardData(currentUser.email); }
 
   function showLoading(s, t='処理中...') { document.getElementById('loadingOverlay').style.display = s?'flex':'none'; document.getElementById('loadingText').textContent = t; }
